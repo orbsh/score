@@ -48,11 +48,21 @@ fn newlines_are_layout() {
 fn journal_round_trips() {
     let g = build(include_str!("../../../examples/sum.score"));
     let run = exec::run(&g, false).expect("run");
-    let text = score_core::journal::write(&run.entries);
+    let text = score_core::journal::write(g.fingerprint(), &run.entries);
     let back = score_core::journal::read(&text).expect("read");
-    assert_eq!(back.len(), run.entries.len());
-    assert_eq!(back[2].value, Value::Int(5));
-    assert_eq!(back[2].node, "total");
+    assert_eq!(back.graph, Some(g.fingerprint()));
+    assert_eq!(back.entries.len(), run.entries.len());
+    assert_eq!(back.entries[2].value, Value::Int(5));
+    assert_eq!(back.entries[2].node, "total");
+}
+
+#[test]
+fn fingerprint_ignores_layout_but_not_content() {
+    let a = parser::parse("s = lit(value: 1)\ns -> add<a|out>(b: 2)\n").expect("a");
+    let b = parser::parse("s = lit(value: 1)\ns\n -> add<a|out>(b: 2)\n").expect("b");
+    assert_eq!(a.fingerprint(), b.fingerprint());
+    let c = parser::parse("s = lit(value: 2)\ns -> add<a|out>(b: 2)\n").expect("c");
+    assert_ne!(a.fingerprint(), c.fingerprint());
 }
 
 #[test]

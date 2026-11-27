@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 use crate::exec::Entry;
 use crate::value::{Value, json_string};
 
-pub fn write(entries: &[Entry]) -> String {
-    let mut out = String::new();
+pub fn write(graph: u64, entries: &[Entry]) -> String {
+    let mut out = format!("{{\"version\":1,\"graph\":\"{graph:016x}\"}}\n");
     for e in entries {
         out.push_str(&format!(
             "{{\"seq\":{},\"node\":{},\"op\":{},\"port\":{},\"value\":{}}}\n",
@@ -21,8 +21,16 @@ pub fn write(entries: &[Entry]) -> String {
     out
 }
 
-pub fn read(src: &str) -> Result<Vec<Entry>, String> {
-    let mut out = Vec::new();
+pub struct Journal {
+    /// The fingerprint of the graph the entries were produced by, when the
+    /// file carries a header.
+    pub graph: Option<u64>,
+    pub entries: Vec<Entry>,
+}
+
+pub fn read(src: &str) -> Result<Journal, String> {
+    let mut graph = None;
+    let mut entries = Vec::new();
     for (n, line) in src.lines().enumerate() {
         let line = line.trim();
         if line.is_empty() {
@@ -33,6 +41,19 @@ pub fn read(src: &str) -> Result<Vec<Entry>, String> {
             i: 0,
         };
         let obj = p.object().map_err(|e| format!("line {}: {e}", n + 1))?;
+        if obj.contains_key("version") {
+            match obj.get("graph") {
+                Some(Json::Str(hex)) => {
+                    graph = Some(
+                        u64::from_str_radix(hex, 16)
+                            .map_err(|_| format!("line {}: bad `graph`", n + 1))?,
+                    );
+                }
+                None => return Err(format!("line {}: header without `graph`", n + 1)),
+                Some(_) => return Err(format!("line {}: bad `graph`", n + 1)),
+            }
+            continue;
+        }
         let seq = match obj.get("seq") {
             Some(Json::Int(i)) if *i >= 0 => *i as usize,
             _ => return Err(format!("line {}: missing `seq`", n + 1)),
@@ -47,7 +68,7 @@ pub fn read(src: &str) -> Result<Vec<Entry>, String> {
             Some(Json::Null) => Value::Unit,
             None => return Err(format!("line {}: missing `value`", n + 1)),
         };
-        out.push(Entry {
+        entries.push(Entry {
             seq,
             node,
             op,
@@ -55,7 +76,7 @@ pub fn read(src: &str) -> Result<Vec<Entry>, String> {
             value,
         });
     }
-    Ok(out)
+    Ok(Journal { graph, entries })
 }
 
 fn text(obj: &BTreeMap<String, Json>, key: &str, line: usize) -> Result<String, String> {

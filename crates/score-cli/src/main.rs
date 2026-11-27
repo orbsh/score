@@ -74,13 +74,23 @@ fn main() -> ExitCode {
                         return ExitCode::FAILURE;
                     }
                 };
-                let entries = match journal::read(&text) {
+                let loaded = match journal::read(&text) {
                     Ok(v) => v,
                     Err(e) => {
                         eprintln!("bad journal {path}: {e}");
                         return ExitCode::FAILURE;
                     }
                 };
+                if let Some(h) = loaded.graph
+                    && h != graph.fingerprint()
+                {
+                    eprintln!(
+                        "the journal was written for graph {h:016x}, this program is {:016x}",
+                        graph.fingerprint()
+                    );
+                    return ExitCode::FAILURE;
+                }
+                let entries = loaded.entries;
                 for e in &entries {
                     match graph.node(&e.node) {
                         Some(n) if n.op == e.op => {}
@@ -117,7 +127,7 @@ fn main() -> ExitCode {
             let mut all = done;
             all.extend(run.entries.iter().cloned());
             if let Some(path) = &journal_out
-                && let Err(e) = std::fs::write(path, journal::write(&all))
+                && let Err(e) = std::fs::write(path, journal::write(graph.fingerprint(), &all))
             {
                 eprintln!("cannot write {path}: {e}");
                 return ExitCode::FAILURE;
