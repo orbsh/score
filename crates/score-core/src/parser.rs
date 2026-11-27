@@ -489,8 +489,12 @@ fn parse_step(
         ));
     }
 
-    if op == "map" || op == "fold" {
-        let want = if op == "map" { 1 } else { 2 };
+    let container_arity = match op.as_str() {
+        "map" | "filter" | "any" | "all" => Some(1),
+        "fold" => Some(2),
+        _ => None,
+    };
+    if let Some(want) = container_arity {
         let sub = match args.get("f") {
             Some(Arg::Ref(target)) => match defs.get(target) {
                 Some(def) => {

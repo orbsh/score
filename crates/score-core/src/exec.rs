@@ -221,6 +221,40 @@ fn run_container(
             }
             Ok(acc)
         }
+        "filter" | "any" | "all" => {
+            let mut kept = Vec::new();
+            let mut any_hit = false;
+            let mut all_hit = true;
+            for item in xs {
+                let mut seed = BTreeMap::new();
+                seed.insert(sub.inputs[0].clone(), item.clone());
+                let run = run_from(&sub.graph, false, &seed, 0)?;
+                let v =
+                    run.values.get(&sub.output).cloned().ok_or_else(|| {
+                        format!("`{op}`: the body produced no `{}`", sub.output.0)
+                    })?;
+                let hit = match v {
+                    Value::Bool(b) => b,
+                    other => {
+                        return Err(format!(
+                            "`{op}` wants a Bool from the body, got {}",
+                            type_of(&other).name()
+                        ));
+                    }
+                };
+                if hit {
+                    any_hit = true;
+                    kept.push(item.clone());
+                } else {
+                    all_hit = false;
+                }
+            }
+            match op {
+                "filter" => Ok(Value::List(kept)),
+                "any" => Ok(Value::Bool(any_hit)),
+                _ => Ok(Value::Bool(all_hit)),
+            }
+        }
         other => Err(format!("`{other}` does not run a def per element")),
     }
 }

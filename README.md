@@ -17,9 +17,9 @@ cargo run -p score-cli -- run examples/sum.score --resume /tmp/run.jsonl --journ
 
 The journal is one JSON line per firing (`seq`, `node`, `op`, `port`, `value`), under a header carrying the graph's fingerprint. `--resume` seeds a run from such a file: the values are re-delivered along the edges and the graph continues from the first node with no entry. A journal from a different graph is refused outright, so an edited program cannot be resumed against stale values.
 
-Implemented today: the v0 surface (bindings, `<in|out>` ports, `->` / `-->` / `-[cond]->`, `const`, `def` with inlining), validation (ports, types, one edge per input, a `[*]` arm for every conditional branch), list values, and a worklist runtime with thirteen in-process operators (`lit`, `add`, `concat`, `upper`, `len`, `print`, `range`, `count`, `sum`, `join`, `at`, `map`, `fold`).
+Implemented today: the v0 surface (bindings, `<in|out>` ports, `->` / `-->` / `-[cond]->`, `const`, `def` with inlining), validation (ports, types, one edge per input, a `[*]` arm for every conditional branch, no ring without a budget), list values, and a worklist runtime with eighteen in-process operators (`lit`, `add`, `concat`, `upper`, `len`, `print`, `range`, `count`, `sum`, `join`, `at`, `map`, `fold`, `filter`, `any`, `all`, `gt`, `eq`).
 
-`map` and `fold` take a def as their body: the def's graph is cloned once as a template whose param nodes the runtime seeds, and it runs once per element (`fold` threads the accumulator through the same body).
+`map` and `fold` take a def as their body: the def's graph is cloned once as a template whose param nodes the runtime seeds, and it runs once per element (`fold` threads the accumulator through the same body). `filter`, `any` and `all` take the same template and read a Bool from it.
 
 Rings are graph cycles with a budget: `acc -[budget: 5]-> acc<a|>` carries the value back into its own input at most five times, and a plain edge into the same port supplies the first value. The runtime fires a node again only when one of its input stamps moved, so an ordinary program behaves as before while a ring turns until its budget runs out. A cycle without a budget is rejected by validation.
 

@@ -67,6 +67,26 @@ static FOLD: Sig = Sig {
     ins: &[("f", Ty::Any), ("acc", Ty::Any), ("xs", Ty::List)],
     outs: &[("out", Ty::Any)],
 };
+static FILTER: Sig = Sig {
+    ins: &[("f", Ty::Any), ("xs", Ty::List)],
+    outs: &[("out", Ty::List)],
+};
+static ANY: Sig = Sig {
+    ins: &[("f", Ty::Any), ("xs", Ty::List)],
+    outs: &[("out", Ty::Bool)],
+};
+static ALL: Sig = Sig {
+    ins: &[("f", Ty::Any), ("xs", Ty::List)],
+    outs: &[("out", Ty::Bool)],
+};
+static GT: Sig = Sig {
+    ins: &[("a", Ty::Any), ("b", Ty::Any)],
+    outs: &[("out", Ty::Bool)],
+};
+static EQ: Sig = Sig {
+    ins: &[("a", Ty::Any), ("b", Ty::Any)],
+    outs: &[("out", Ty::Bool)],
+};
 
 pub fn signature(op: &str) -> Option<&'static Sig> {
     match op {
@@ -84,6 +104,11 @@ pub fn signature(op: &str) -> Option<&'static Sig> {
         "param" => Some(&PARAM),
         "map" => Some(&MAP),
         "fold" => Some(&FOLD),
+        "filter" => Some(&FILTER),
+        "any" => Some(&ANY),
+        "all" => Some(&ALL),
+        "gt" => Some(&GT),
+        "eq" => Some(&EQ),
         _ => None,
     }
 }
@@ -183,7 +208,21 @@ pub fn apply(op: &str, args: &BTreeMap<&str, Value>) -> Result<Value, String> {
             }
             Ok(items[index as usize].clone())
         }
-        "map" | "fold" => Err(format!(
+        "gt" => {
+            let a = get("a")?;
+            let b = get("b")?;
+            match (&a, &b) {
+                (Value::Int(x), Value::Int(y)) => Ok(Value::Bool(x > y)),
+                (Value::Text(x), Value::Text(y)) => Ok(Value::Bool(x > y)),
+                _ => Err(format!(
+                    "`gt` compares Int or Text, got {} and {}",
+                    type_of(&a).name(),
+                    type_of(&b).name()
+                )),
+            }
+        }
+        "eq" => Ok(Value::Bool(get("a")? == get("b")?)),
+        "map" | "fold" | "filter" | "any" | "all" => Err(format!(
             "`{op}` runs a def per element and is driven by the runtime, not by `apply`"
         )),
         "param" => Err("a parameter is seeded by the runtime, it never fires".to_string()),

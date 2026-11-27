@@ -1,0 +1,12 @@
+# 谓词：def 返回 Bool，用它筛、问「有」和「都」
+def big(x: Int) -> (result) {
+  result = gt(a: x, b: 2)
+}
+
+xs = range(n: 6)
+ys = filter(f: big, xs: xs)
+some = any(f: big, xs: xs)
+every = all(f: big, xs: xs)
+print(value: ys)
+print(value: some)
+print(value: every)

@@ -45,6 +45,28 @@ fn newlines_are_layout() {
 }
 
 #[test]
+fn filter_and_predicates_run_a_def() {
+    let g = build(include_str!("../../../examples/filter.score"));
+    let run = exec::run(&g, false).expect("run");
+    assert_eq!(
+        run.values.get(&("ys".to_string(), "out".to_string())),
+        Some(&Value::List(vec![
+            Value::Int(3),
+            Value::Int(4),
+            Value::Int(5)
+        ]))
+    );
+    assert_eq!(
+        run.values.get(&("some".to_string(), "out".to_string())),
+        Some(&Value::Bool(true))
+    );
+    assert_eq!(
+        run.values.get(&("every".to_string(), "out".to_string())),
+        Some(&Value::Bool(false))
+    );
+}
+
+#[test]
 fn a_ring_turns_within_its_budget() {
     let g = build(include_str!("../../../examples/ring.score"));
     let run = exec::run(&g, false).expect("run");
