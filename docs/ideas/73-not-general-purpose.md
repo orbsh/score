@@ -8,7 +8,7 @@
 
 **形态**：
 
-- **语义**：二进制图（[87](87-binary-graph-is-the-artifact.md)）——步骤、端口、边、子图、容器与 join。
+- **语义**：二进制图（[87](87-binary-graph-is-the-artifact.md)）——步骤、端口、边、子图、容器与 combine。
 - **计算**：节点所指的外部操作——宿主函数、工具、request；语言自己不执行计算。
 - **语言负责**：端口与类型（[83](83-subgraph-is-a-function.md)）、边与合并（[89](89-edges.md)、[88](88-containers-and-joins.md)）、seed 与 budget、validate、run 日志。
 - **表示**：文本与渲染都是图的投影，不是第二份程序（[71](71-kdl-surface-syntax.md)、[87](87-binary-graph-is-the-artifact.md)）。

@@ -14,8 +14,9 @@
 
 - **普通**：A.out → B.x，值随 token 走。
 - **扇出**：一个输出端口多条出边；值不可变，读不复制。
-- **合并**：显式 join 节点（[88](88-containers-and-joins.md)）；zip 配对、merge 每 token 一次、collect 够 n 个。
+- **合并**：显式 combine 节点（[88](88-containers-and-joins.md)）；zip 配对、merge 每 token 一次、collect 够 n 个。
 - **分支**：互斥由源决定（一次发一个标签），`*` 兜底必须存在；谓词是表面糖，在声明门降级成 selector 节点。
+- **变体分支**：输出类型是带标签的和时，节点可以给每个变体一个端口，一次只有一个发火——与 selector 同为源侧互斥，标签从运行期字符串换成编译期变体名。边仍然只接端口，不给边加第二种派发语义。
 - **环**：回边不声明，由 SCC 找出；反馈端口带 seed；环要有 budget；终止走 selector 的出口，不回边。
 - **失败**：节点有 `failed` 输出端口，失败路径就是普通边——不引入「状态条件」这种第二套谓词。
 - **多输出**：输出节点是汇；每个输出节点一个输入端口，图的返回是它们实际发火的集合（[83](83-subgraph-is-a-function.md)）。
@@ -25,10 +26,11 @@
 **代价**：
 
 - **端口必须命名**：位置实参在渲染、子图重构、多输出面前都会错位。
-- **一条入边会多出节点**：「两个上游都可能供值」必须画一个 join；小图因此变宽。
+- **一条入边会多出节点**：「两个上游都可能供值」必须画一个 combine；小图因此变宽。
 - **条件需要一个求值器**：谓词落在 selector 上，叶子因此存在（[82](82-graph-is-the-semantics.md)）。
+- **穷尽性要查**：变体端口要么被接、要么显式忽略，否则 validate 拒绝——漏一个变体是编译期错误，不是运行时空转。
 - **环的判定是编译期的**：SCC、seed、budget 都是 validate 的活，配错是拒绝而不是运行期挂死。
 
-**冲突**：[88](88-containers-and-joins.md)（join 与 seed 在这里是边规则）、[83](83-subgraph-is-a-function.md)（端口即签名）、[85](85-graph-linearization.md)（线性化要按边选次序）、[87](87-binary-graph-is-the-artifact.md)（边是二进制格式的一部分）。
+**冲突**：[88](88-containers-and-joins.md)（combine 与 seed 在这里是边规则）、[83](83-subgraph-is-a-function.md)（端口即签名）、[85](85-graph-linearization.md)（线性化要按边选次序）、[87](87-binary-graph-is-the-artifact.md)（边是二进制格式的一部分）、[90](90-types.md)（和类型与变体名是变体分支的来源）。
 
 **若改掉会动到**：schematic 的 Edge 模型（to / when / budget → 端口与值）、validate、运行文档编码、渲染。

@@ -31,6 +31,6 @@ j.render
 - **取一次值就返回 `Option`**，每次都要判，比动态语言啰嗦——这是有意的（软杠杆），但对「只想读个配置」的场景很烦。
 - **它是个口子**：语言说「类型必填」，这个类型又把所有类型都装进去了。
 
-**冲突**：[43](retired/43-jsonpath-query.md)（查询子集要动它的形状）、[44](retired/44-text-repr.md)、[29](retired/29-data-first-levers.md)（「类型必填」的软化处就在这里）。
+**冲突**：[90](90-types.md)（值之上的类型视图：结构相等、没有 null）、[43](retired/43-jsonpath-query.md)（查询子集要动它的形状）、[44](retired/44-text-repr.md)、[29](retired/29-data-first-levers.md)（「类型必填」的软化处就在这里）。
 
 **若改掉会动到**：[42](42-path-segments.md)、[62](62-byte-boundary.md)（宿主边界就是以它为中转）、[28](retired/28-construct-controlled.md)（边界类型是否要包成不让直接构造的 newtype）。

@@ -35,8 +35,12 @@
 - [87 二进制图是本体](87-binary-graph-is-the-artifact.md)
 - [83 子图即函数：签名、内联、没有调用栈](83-subgraph-is-a-function.md)
 - [84 折叠忠实：子图内部不得连到外部](84-folding-fidelity.md)
-- [88 容器与 join：实例化的两个参数](88-containers-and-joins.md)
+- [88 容器与 combine：实例化的两个参数](88-containers-and-joins.md)
 - [89 边：端口到端口，一条入边](89-edges.md)
+- [90 类型：标量、数组、记录与和](90-types.md)
+- [91 常量与配置：常量节点，覆盖在 run 创建时](91-constants-and-config.md)
+- [92 流与批：入口声明类型，不引入流原语](92-streams-and-batches.md)
+- [93 splice 与 okm：查询语言与内置存储](93-splice-and-okm.md)
 - [85 图的线性化：顺序、跳转与可挂起帧](85-graph-linearization.md)
 - [73 不是通用语言，是协调语言](73-not-general-purpose.md)
 - [74 非对称收益：砍能力面，换每次操作](74-asymmetric-payoff.md)（判断「砍什么」的尺子）
