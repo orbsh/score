@@ -1,0 +1,7 @@
+# def 也能从链上进入：单参数的 def 默认吃链上传来的值
+def double(x: Int) -> (result) {
+  result = add(a: x, b: x)
+}
+
+n = lit(value: 21)
+n -> double -> print

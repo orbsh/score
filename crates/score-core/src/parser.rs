@@ -116,6 +116,7 @@ fn parse_lines(
                         defs,
                         &mut auto,
                         Some(name.clone()),
+                        None,
                     )?;
                     if used != line[2..].len() {
                         return Err(format!("trailing tokens after the call to `{name}`"));
@@ -124,7 +125,8 @@ fn parse_lines(
                     current = head.clone();
                 }
                 Some(Tok::LParen) | Some(Tok::Lt) => {
-                    let (step, used) = parse_step(&mut g, line, consts, defs, &mut auto, None)?;
+                    let (step, used) =
+                        parse_step(&mut g, line, consts, defs, &mut auto, None, None)?;
                     if used != line.len() {
                         return Err(format!("trailing tokens after the call to `{}`", step.name));
                     }
@@ -303,7 +305,7 @@ fn run_steps(
     let mut rest = toks;
     let mut first_step = true;
     loop {
-        let (step, used) = parse_step(g, rest, consts, defs, auto, None)?;
+        let (step, used) = parse_step(g, rest, consts, defs, auto, None, Some(&src))?;
         if !step.inlined {
             let in_port = step.in_port.clone().ok_or_else(|| {
                 format!(
@@ -345,6 +347,7 @@ fn parse_step(
     defs: &BTreeMap<String, Def>,
     auto: &mut usize,
     hint: Option<String>,
+    entry: Option<&(String, String)>,
 ) -> Result<(Step, usize), String> {
     let mut i = 0usize;
     let mut binding = hint;
@@ -359,7 +362,6 @@ fn parse_step(
         other => return Err(format!("expected an operator, got {other:?}")),
     };
     i += 1;
-    let bound = binding.is_some();
     let name = match binding.take() {
         Some(n) => n,
         None => {
@@ -450,15 +452,35 @@ fn parse_step(
     }
 
     if let Some(def) = defs.get(&op) {
-        if !bound {
-            return Err(format!("a def call needs a name: write `n = {op}(...)`"));
-        }
-        if spec_in.is_some() {
-            return Err(format!(
-                "`{op}` takes its inputs as arguments; chaining into a def is not implemented"
-            ));
-        }
-        let out_port = inline_def(g, def, &op, &name, &args, spec_out.as_deref())?;
+        // The entry port comes from the port spec, or from the single parameter.
+        let entry_port = match &spec_in {
+            Some(p) => Some(p.clone()),
+            None if def.params.len() == 1 => Some(def.params[0].0.clone()),
+            None => None,
+        };
+        let chained = match (&entry_port, entry) {
+            (Some(p), Some(slot)) => {
+                if args.contains_key(p) {
+                    return Err(format!(
+                        "`{op}.{p}` has both an argument and a chained value"
+                    ));
+                }
+                if !def.params.iter().any(|(name, _)| name == p) {
+                    return Err(format!("`{op}` has no input `{p}`"));
+                }
+                Some((p.clone(), slot.clone()))
+            }
+            _ => None,
+        };
+        let out_port = inline_def(
+            g,
+            def,
+            &op,
+            &name,
+            &args,
+            spec_out.as_deref(),
+            chained.as_ref(),
+        )?;
         return Ok((
             Step {
                 name,
@@ -544,6 +566,7 @@ fn inline_def(
     bind: &str,
     args: &BTreeMap<String, Arg>,
     spec_out: Option<&str>,
+    chained: Option<&(String, (String, String))>,
 ) -> Result<String, String> {
     let out_name = match spec_out {
         Some(name) => {
@@ -563,6 +586,29 @@ fn inline_def(
     };
 
     for (p, ty) in &def.params {
+        if let Some((name, slot)) = chained
+            && name == p
+        {
+            let sn = g
+                .node(&slot.0)
+                .ok_or_else(|| format!("unknown node `{}`", slot.0))?;
+            let ssig = ops::signature(&sn.op)
+                .ok_or_else(|| format!("`{}` cannot feed `{op_name}.{p}`", sn.op))?;
+            let got = ssig
+                .outs
+                .iter()
+                .find(|(o, _)| *o == slot.1)
+                .map(|(_, t)| *t)
+                .ok_or_else(|| format!("`{}` has no output `{}`", sn.op, slot.1))?;
+            if !accepts(*ty, got) {
+                return Err(format!(
+                    "`{op_name}.{p}` wants {}, got {}",
+                    ty.name(),
+                    got.name()
+                ));
+            }
+            continue;
+        }
         let arg = args
             .get(p)
             .ok_or_else(|| format!("`{op_name}` needs `{p}: {}`", ty.name()))?;
@@ -604,9 +650,16 @@ fn inline_def(
         rename.insert(n.name.clone(), new_name);
     }
 
-    // Param sources: a literal becomes a lit node, a reference is wired directly.
+    // Param sources: a literal becomes a lit node, a reference or the chained
+    // slot is wired directly.
     let mut resolved: BTreeMap<String, (String, String)> = BTreeMap::new();
     for (p, _) in &def.params {
+        if let Some((name, slot)) = chained
+            && name == p
+        {
+            resolved.insert(p.clone(), slot.clone());
+            continue;
+        }
         match args.get(p) {
             Some(Arg::Ref(r)) => {
                 let rn = g.node(r).ok_or_else(|| format!("unknown node `{r}`"))?;
@@ -620,6 +673,11 @@ fn inline_def(
 
     for n in &def.body.nodes {
         if n.op == "param" {
+            if let Some((name, _)) = chained
+                && *name == n.name
+            {
+                continue;
+            }
             match args.get(&n.name) {
                 Some(Arg::Ref(_)) => continue,
                 _ => {

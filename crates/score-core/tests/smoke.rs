@@ -45,6 +45,18 @@ fn newlines_are_layout() {
 }
 
 #[test]
+fn a_chain_can_enter_a_def() {
+    let g = build(include_str!("../../../examples/chain_def.score"));
+    let run = exec::run(&g, false).expect("run");
+    let got = run
+        .entries
+        .iter()
+        .find(|e| e.node == "double#1")
+        .map(|e| e.value.clone());
+    assert_eq!(got, Some(Value::Int(42)));
+}
+
+#[test]
 fn filter_and_predicates_run_a_def() {
     let g = build(include_str!("../../../examples/filter.score"));
     let run = exec::run(&g, false).expect("run");
