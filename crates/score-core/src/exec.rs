@@ -6,17 +6,58 @@ use crate::ast::{Arg, BinOp, Edge, Expr, Graph, Guard};
 use crate::ops;
 use crate::value::{Value, type_of};
 
+#[derive(Debug)]
 pub struct Run {
     pub values: BTreeMap<(String, String), Value>,
     pub order: Vec<String>,
     /// Nodes that never became ready: an arm a branch did not select, or a dead path.
     pub skipped: Vec<String>,
+    /// One entry per firing, in the order the nodes fired.
+    pub entries: Vec<Entry>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Entry {
+    pub seq: usize,
+    pub node: String,
+    pub op: String,
+    pub port: String,
+    pub value: Value,
 }
 
 pub fn run(g: &Graph, trace: bool) -> Result<Run, String> {
-    let mut values: BTreeMap<(String, String), Value> = BTreeMap::new();
+    run_from(g, trace, &BTreeMap::new(), 0)
+}
+
+/// Resume: values already in the journal seed the run, and their edges are
+/// re-delivered so downstream nodes see the same inputs they would have seen.
+pub fn run_from(
+    g: &Graph,
+    trace: bool,
+    seed: &BTreeMap<(String, String), Value>,
+    seq_base: usize,
+) -> Result<Run, String> {
+    let mut values: BTreeMap<(String, String), Value> = seed.clone();
     let mut done: BTreeSet<String> = BTreeSet::new();
+    for (node, port) in seed.keys() {
+        let n = g.node(node).ok_or_else(|| {
+            format!("the journal has `{node}`, which is not a node of this graph")
+        })?;
+        if n.out_port != *port {
+            return Err(format!(
+                "the journal has `{node}.{port}`, but this graph has `{node}.{}`",
+                n.out_port
+            ));
+        }
+        done.insert(node.clone());
+    }
+    for ((node, port), v) in seed {
+        deliver(g, node, port, v, &mut values)?;
+    }
+
     let mut order: Vec<String> = Vec::new();
+    let mut entries: Vec<Entry> = Vec::new();
+    let mut seq = seq_base;
 
     loop {
         let mut progress = false;
@@ -61,6 +102,14 @@ pub fn run(g: &Graph, trace: bool) -> Result<Run, String> {
             if trace {
                 println!("run {} ({}) -> {}", node.name, node.op, out);
             }
+            entries.push(Entry {
+                seq: seq + 1,
+                node: node.name.clone(),
+                op: node.op.clone(),
+                port: node.out_port.clone(),
+                value: out.clone(),
+            });
+            seq += 1;
             values.insert((node.name.clone(), node.out_port.clone()), out.clone());
             deliver(g, &node.name, &node.out_port, &out, &mut values)?;
             done.insert(node.name.clone());
@@ -83,6 +132,7 @@ pub fn run(g: &Graph, trace: bool) -> Result<Run, String> {
         values,
         order,
         skipped,
+        entries,
     })
 }
 

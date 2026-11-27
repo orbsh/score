@@ -45,6 +45,56 @@ fn newlines_are_layout() {
 }
 
 #[test]
+fn journal_round_trips() {
+    let g = build(include_str!("../../../examples/sum.score"));
+    let run = exec::run(&g, false).expect("run");
+    let text = score_core::journal::write(&run.entries);
+    let back = score_core::journal::read(&text).expect("read");
+    assert_eq!(back.len(), run.entries.len());
+    assert_eq!(back[2].value, Value::Int(5));
+    assert_eq!(back[2].node, "total");
+}
+
+#[test]
+fn resume_finishes_where_the_journal_stopped() {
+    let g = build(include_str!("../../../examples/sum.score"));
+    let first = exec::run(&g, false).expect("run");
+    let mut seed: std::collections::BTreeMap<(String, String), Value> =
+        std::collections::BTreeMap::new();
+    for e in &first.entries[..3] {
+        seed.insert((e.node.clone(), e.port.clone()), e.value.clone());
+    }
+    let again = exec::run_from(&g, false, &seed, 3).expect("resume");
+    assert_eq!(again.entries.len(), 1);
+    assert_eq!(again.entries[0].node, "print#1");
+    assert_eq!(again.entries[0].seq, 4);
+    assert_eq!(
+        again.values.get(&("total".to_string(), "out".to_string())),
+        Some(&Value::Int(5))
+    );
+}
+
+#[test]
+fn resume_rejects_a_value_the_graph_no_longer_has() {
+    let g = build(include_str!("../../../examples/sum.score"));
+    let mut seed: std::collections::BTreeMap<(String, String), Value> =
+        std::collections::BTreeMap::new();
+    seed.insert(("ghost".to_string(), "out".to_string()), Value::Int(1));
+    let e = exec::run_from(&g, false, &seed, 0).expect_err("must fail");
+    assert!(e.contains("ghost"), "{e}");
+}
+
+#[test]
+fn journal_has_one_entry_per_firing() {
+    let g = build(include_str!("../../../examples/sum.score"));
+    let run = exec::run(&g, false).expect("run");
+    assert_eq!(run.entries.len(), 4);
+    assert_eq!(run.entries[2].seq, 3);
+    assert_eq!(run.entries[2].node, "total");
+    assert_eq!(run.entries[2].value, Value::Int(5));
+}
+
+#[test]
 fn def_inlines_at_the_call_site() {
     let g = build(include_str!("../../../examples/def.score"));
     let run = exec::run(&g, false).expect("run");

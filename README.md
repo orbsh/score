@@ -11,7 +11,11 @@ Positioning: [docs/ideas/94-value-proposition.md](docs/ideas/94-value-propositio
 ```
 cargo run -p score-cli -- validate examples/sum.score
 cargo run -p score-cli -- run examples/sum.score --trace
+cargo run -p score-cli -- run examples/sum.score --journal /tmp/run.jsonl
+cargo run -p score-cli -- run examples/sum.score --resume /tmp/run.jsonl --journal /tmp/run2.jsonl
 ```
+
+The journal is one JSON line per firing (`seq`, `node`, `op`, `port`, `value`). `--resume` seeds a run from such a file: the values are re-delivered along the edges and the graph continues from the first node with no entry; the file is checked against the graph first, so a node or an operator that no longer matches is refused rather than silently misread.
 
 Implemented today: the v0 surface (bindings, `<in|out>` ports, `->` / `-->` / `-[cond]->`, `const`, `def` with inlining), validation (ports, types, one edge per input, a `[*]` arm for every conditional branch), and a worklist runtime with six in-process operators (`lit`, `add`, `concat`, `upper`, `len`, `print`).
 
