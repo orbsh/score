@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::ast::{Arg, BinOp, Edge, Expr, Graph, Guard};
+use crate::ast::{Arg, BinOp, Edge, Expr, Graph, Guard, SubGraph};
 use crate::ops;
 use crate::value::{Value, type_of};
 
@@ -68,10 +68,14 @@ pub fn run_from(
             let sig = ops::signature(&node.op)
                 .ok_or_else(|| format!("unknown operator `{}`", node.op))?;
             let mut inputs: BTreeMap<&str, Value> = BTreeMap::new();
+            let mut subs: BTreeMap<&str, &SubGraph> = BTreeMap::new();
             let mut ready = true;
             for (port, _) in sig.ins {
                 if let Some(arg) = node.args.get(*port) {
                     match arg {
+                        Arg::Sub(sub) => {
+                            subs.insert(*port, sub);
+                        }
                         Arg::Lit(v) => {
                             inputs.insert(*port, v.clone());
                         }
@@ -98,7 +102,11 @@ pub fn run_from(
             if !ready {
                 continue;
             }
-            let out = ops::apply(&node.op, &inputs)?;
+            let out = if subs.is_empty() {
+                ops::apply(&node.op, &inputs)?
+            } else {
+                run_container(&node.op, &subs, &inputs)?
+            };
             if trace {
                 println!("run {} ({}) -> {}", node.name, node.op, out);
             }
@@ -134,6 +142,54 @@ pub fn run_from(
         skipped,
         entries,
     })
+}
+
+fn run_container(
+    op: &str,
+    subs: &BTreeMap<&str, &SubGraph>,
+    inputs: &BTreeMap<&str, Value>,
+) -> Result<Value, String> {
+    let sub = subs
+        .get("f")
+        .ok_or_else(|| format!("`{op}` needs a def as `f`"))?;
+    let xs = match inputs.get("xs") {
+        Some(Value::List(items)) => items,
+        _ => return Err(format!("`{op}` needs a list in `xs`")),
+    };
+    match op {
+        "map" => {
+            let mut out = Vec::with_capacity(xs.len());
+            for item in xs {
+                let mut seed = BTreeMap::new();
+                seed.insert(sub.inputs[0].clone(), item.clone());
+                let run = run_from(&sub.graph, false, &seed, 0)?;
+                out.push(
+                    run.values.get(&sub.output).cloned().ok_or_else(|| {
+                        format!("`{op}`: the body produced no `{}`", sub.output.0)
+                    })?,
+                );
+            }
+            Ok(Value::List(out))
+        }
+        "fold" => {
+            let mut acc = inputs
+                .get("acc")
+                .cloned()
+                .ok_or_else(|| "`fold` needs `acc`".to_string())?;
+            for item in xs {
+                let mut seed = BTreeMap::new();
+                seed.insert(sub.inputs[0].clone(), acc.clone());
+                seed.insert(sub.inputs[1].clone(), item.clone());
+                let run = run_from(&sub.graph, false, &seed, 0)?;
+                acc =
+                    run.values.get(&sub.output).cloned().ok_or_else(|| {
+                        format!("`fold`: the body produced no `{}`", sub.output.0)
+                    })?;
+            }
+            Ok(acc)
+        }
+        other => Err(format!("`{other}` does not run a def per element")),
+    }
 }
 
 fn deliver(

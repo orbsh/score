@@ -53,6 +53,20 @@ static AT: Sig = Sig {
     ins: &[("xs", Ty::List), ("index", Ty::Int)],
     outs: &[("out", Ty::Any)],
 };
+/// A def's parameter while its body sits inside a container node; the runtime
+/// seeds it, so it never fires on its own.
+static PARAM: Sig = Sig {
+    ins: &[],
+    outs: &[],
+};
+static MAP: Sig = Sig {
+    ins: &[("f", Ty::Any), ("xs", Ty::List)],
+    outs: &[("out", Ty::List)],
+};
+static FOLD: Sig = Sig {
+    ins: &[("f", Ty::Any), ("acc", Ty::Any), ("xs", Ty::List)],
+    outs: &[("out", Ty::Any)],
+};
 
 pub fn signature(op: &str) -> Option<&'static Sig> {
     match op {
@@ -67,6 +81,9 @@ pub fn signature(op: &str) -> Option<&'static Sig> {
         "sum" => Some(&SUM),
         "join" => Some(&JOIN),
         "at" => Some(&AT),
+        "param" => Some(&PARAM),
+        "map" => Some(&MAP),
+        "fold" => Some(&FOLD),
         _ => None,
     }
 }
@@ -166,6 +183,10 @@ pub fn apply(op: &str, args: &BTreeMap<&str, Value>) -> Result<Value, String> {
             }
             Ok(items[index as usize].clone())
         }
+        "map" | "fold" => Err(format!(
+            "`{op}` runs a def per element and is driven by the runtime, not by `apply`"
+        )),
+        "param" => Err("a parameter is seeded by the runtime, it never fires".to_string()),
         other => Err(format!("unknown operator `{other}`")),
     }
 }

@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::ast::{Arg, Expr, Graph, Guard, Node};
 use crate::ops;
-use crate::value::{accepts, type_of};
+use crate::value::{Ty, accepts, type_of};
 
 pub fn validate(g: &Graph) -> Result<(), String> {
     let mut by_name: BTreeMap<&str, &Node> = BTreeMap::new();
@@ -16,7 +16,7 @@ pub fn validate(g: &Graph) -> Result<(), String> {
 
     for n in &g.nodes {
         let sig = ops::signature(&n.op).ok_or_else(|| format!("unknown operator `{}`", n.op))?;
-        if !sig.outs.iter().any(|(p, _)| *p == n.out_port) {
+        if !sig.outs.iter().any(|(p, _)| *p == n.out_port) && n.op != "param" {
             return Err(format!("`{}` has no output port `{}`", n.op, n.out_port));
         }
         for (port, arg) in &n.args {
@@ -25,21 +25,30 @@ pub fn validate(g: &Graph) -> Result<(), String> {
                 .iter()
                 .find(|(p, _)| *p == port.as_str())
                 .ok_or_else(|| format!("`{}` has no input port `{}`", n.op, port))?;
+            if let Arg::Sub(sub) = arg {
+                validate(&sub.graph)?;
+                continue;
+            }
             let got = match arg {
                 Arg::Lit(v) => type_of(v),
+                Arg::Sub(_) => Ty::Any,
                 Arg::Ref(r) => {
                     let rn = by_name
                         .get(r.as_str())
                         .ok_or_else(|| format!("unknown node `{r}`"))?;
-                    let rsig = ops::signature(&rn.op)
-                        .ok_or_else(|| format!("unknown operator `{}`", rn.op))?;
-                    rsig.outs
-                        .iter()
-                        .find(|(p, _)| *p == rn.out_port)
-                        .map(|(_, t)| *t)
-                        .ok_or_else(|| {
-                            format!("`{}` has no output port `{}`", rn.op, rn.out_port)
-                        })?
+                    if rn.op == "param" {
+                        Ty::Any
+                    } else {
+                        let rsig = ops::signature(&rn.op)
+                            .ok_or_else(|| format!("unknown operator `{}`", rn.op))?;
+                        rsig.outs
+                            .iter()
+                            .find(|(p, _)| *p == rn.out_port)
+                            .map(|(_, t)| *t)
+                            .ok_or_else(|| {
+                                format!("`{}` has no output port `{}`", rn.op, rn.out_port)
+                            })?
+                    }
                 }
             };
             if !accepts(*want, got) {
@@ -63,11 +72,15 @@ pub fn validate(g: &Graph) -> Result<(), String> {
             .ok_or_else(|| format!("edge to unknown node `{}`", e.to.0))?;
         let ssig = ops::signature(&sn.op).ok_or_else(|| format!("unknown operator `{}`", sn.op))?;
         let tsig = ops::signature(&tn.op).ok_or_else(|| format!("unknown operator `{}`", tn.op))?;
-        let (_, sty) = ssig
-            .outs
-            .iter()
-            .find(|(p, _)| *p == e.from.1)
-            .ok_or_else(|| format!("`{}` has no output port `{}`", sn.op, e.from.1))?;
+        let sty = if sn.op == "param" {
+            &Ty::Any
+        } else {
+            ssig.outs
+                .iter()
+                .find(|(p, _)| *p == e.from.1)
+                .map(|(_, t)| t)
+                .ok_or_else(|| format!("`{}` has no output port `{}`", sn.op, e.from.1))?
+        };
         let (_, tty) = tsig
             .ins
             .iter()

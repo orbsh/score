@@ -302,6 +302,14 @@ fn parse_step(
         other => return Err(format!("expected an operator, got {other:?}")),
     };
     i += 1;
+    let bound = binding.is_some();
+    let name = match binding.take() {
+        Some(n) => n,
+        None => {
+            *auto += 1;
+            format!("{op}#{}", *auto)
+        }
+    };
 
     let mut spec_in = None;
     let mut spec_out = None;
@@ -385,17 +393,18 @@ fn parse_step(
     }
 
     if let Some(def) = defs.get(&op) {
-        let bind =
-            binding.ok_or_else(|| format!("a def call needs a name: write `n = {op}(...)`"))?;
+        if !bound {
+            return Err(format!("a def call needs a name: write `n = {op}(...)`"));
+        }
         if spec_in.is_some() {
             return Err(format!(
                 "`{op}` takes its inputs as arguments; chaining into a def is not implemented"
             ));
         }
-        let out_port = inline_def(g, def, &op, &bind, &args, spec_out.as_deref())?;
+        let out_port = inline_def(g, def, &op, &name, &args, spec_out.as_deref())?;
         return Ok((
             Step {
-                name: bind,
+                name,
                 out_port,
                 in_port: None,
                 inlined: true,
@@ -404,14 +413,27 @@ fn parse_step(
         ));
     }
 
+    if op == "map" || op == "fold" {
+        let want = if op == "map" { 1 } else { 2 };
+        let sub = match args.get("f") {
+            Some(Arg::Ref(target)) => match defs.get(target) {
+                Some(def) => {
+                    if def.params.len() != want {
+                        return Err(format!(
+                            "`{op}` wants a def of {want} parameter(s), `{target}` has {}",
+                            def.params.len()
+                        ));
+                    }
+                    subgraph_from(def, &name, &op)?
+                }
+                None => return Err(format!("`{op}` needs a def as `f`; `{target}` is not one")),
+            },
+            _ => return Err(format!("`{op}` needs `f: <def>`")),
+        };
+        args.insert("f".to_string(), Arg::Sub(Box::new(sub)));
+    }
+
     let sig = ops::signature(&op).ok_or_else(|| format!("unknown operator or def `{op}`"))?;
-    let name = match binding {
-        Some(n) => n,
-        None => {
-            *auto += 1;
-            format!("{op}#{}", *auto)
-        }
-    };
     let in_port = spec_in.or_else(|| ops::default_in(sig).map(str::to_string));
     let out_port = spec_out
         .or_else(|| ops::default_out(sig).map(str::to_string))
@@ -466,6 +488,7 @@ fn inline_def(
             .ok_or_else(|| format!("`{op_name}` needs `{p}: {}`", ty.name()))?;
         let got = match arg {
             Arg::Lit(v) => type_of(v),
+            Arg::Sub(_) => Ty::Any,
             Arg::Ref(r) => {
                 let rn = g.node(r).ok_or_else(|| format!("unknown node `{r}`"))?;
                 let rsig = ops::signature(&rn.op)
@@ -539,6 +562,7 @@ fn inline_def(
         for (port, arg) in &n.args {
             let arg2 = match arg {
                 Arg::Lit(v) => Arg::Lit(v.clone()),
+                Arg::Sub(sub) => Arg::Sub(sub.clone()),
                 Arg::Ref(r) => match resolved.get(r) {
                     Some((node, _)) => Arg::Ref(node.clone()),
                     None => Arg::Ref(
@@ -592,6 +616,65 @@ fn inline_def(
 }
 
 type DefSig = (String, Vec<(String, Ty)>, Vec<(String, Ty)>);
+
+/// Clone a def body as a template for `map` / `fold`: names are prefixed, the
+/// param nodes stay (the runtime seeds them), and nothing is wired to a caller.
+fn subgraph_from(def: &Def, prefix: &str, op: &str) -> Result<crate::ast::SubGraph, String> {
+    if def.outs.len() != 1 {
+        return Err(format!("`{op}` wants a def with exactly one output"));
+    }
+    let out_name = def.outs[0].0.clone();
+    let mut rename: BTreeMap<String, String> = BTreeMap::new();
+    for n in &def.body.nodes {
+        rename.insert(n.name.clone(), format!("{prefix}/{}", n.name));
+    }
+
+    let mut g = Graph::default();
+    for n in &def.body.nodes {
+        let mut args = BTreeMap::new();
+        for (port, arg) in &n.args {
+            let arg = match arg {
+                Arg::Lit(v) => Arg::Lit(v.clone()),
+                Arg::Ref(r) => Arg::Ref(
+                    rename
+                        .get(r)
+                        .cloned()
+                        .ok_or_else(|| format!("`{r}` is not a node of `{prefix}`"))?,
+                ),
+                Arg::Sub(sub) => Arg::Sub(sub.clone()),
+            };
+            args.insert(port.clone(), arg);
+        }
+        g.nodes.push(Node {
+            name: rename[&n.name].clone(),
+            op: n.op.clone(),
+            args,
+            out_port: n.out_port.clone(),
+        });
+    }
+    for e in &def.body.edges {
+        g.edges.push(Edge {
+            from: (rename[&e.from.0].clone(), e.from.1.clone()),
+            to: (rename[&e.to.0].clone(), e.to.1.clone()),
+            guard: e.guard.clone(),
+        });
+    }
+
+    let out_port = g
+        .node(&rename[&out_name])
+        .ok_or_else(|| format!("`{op}`: the body never binds its output `{out_name}`"))?
+        .out_port
+        .clone();
+    Ok(crate::ast::SubGraph {
+        graph: g,
+        inputs: def
+            .params
+            .iter()
+            .map(|(p, _)| (rename[p].clone(), p.clone()))
+            .collect(),
+        output: (rename[&out_name].clone(), out_port),
+    })
+}
 
 fn parse_def_header(toks: &[Tok]) -> Result<DefSig, String> {
     let mut i = 0usize;

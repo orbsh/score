@@ -8,6 +8,18 @@ use crate::value::Value;
 pub enum Arg {
     Lit(Value),
     Ref(String),
+    /// A body to run per element: the `f` argument of `map` / `fold`.
+    Sub(Box<SubGraph>),
+}
+
+/// A def body kept as a template: `inputs` are the param nodes the runtime
+/// seeds for each call, `output` is the node and port that carry the result.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SubGraph {
+    pub graph: Graph,
+    /// The param nodes the runtime seeds, with the port they are read from.
+    pub inputs: Vec<(String, String)>,
+    pub output: (String, String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,7 +94,18 @@ impl Graph {
             for (k, a) in &n.args {
                 field(&mut h, "a");
                 field(&mut h, k);
-                field(&mut h, &format!("{a:?}"));
+                match a {
+                    Arg::Sub(sub) => {
+                        field(&mut h, &format!("{:016x}", sub.graph.fingerprint()));
+                        for input in &sub.inputs {
+                            field(&mut h, &input.0);
+                            field(&mut h, &input.1);
+                        }
+                        field(&mut h, &sub.output.0);
+                        field(&mut h, &sub.output.1);
+                    }
+                    other => field(&mut h, &format!("{other:?}")),
+                }
             }
         }
         for e in &self.edges {

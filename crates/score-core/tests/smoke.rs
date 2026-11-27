@@ -45,6 +45,27 @@ fn newlines_are_layout() {
 }
 
 #[test]
+fn map_runs_a_def_per_element() {
+    let g = build(include_str!("../../../examples/containers.score"));
+    let run = exec::run(&g, false).expect("run");
+    assert_eq!(
+        run.values.get(&("ys".to_string(), "out".to_string())),
+        Some(&Value::List((1..=5).map(Value::Int).collect::<Vec<_>>()))
+    );
+    assert_eq!(
+        run.values.get(&("total".to_string(), "out".to_string())),
+        Some(&Value::Int(15))
+    );
+}
+
+#[test]
+fn map_needs_a_def_of_the_right_arity() {
+    let src = "def inc(x: Int) -> (result) {\n  result = add(a: x, b: 1)\n}\nxs = range(n: 2)\nys = fold(f: inc, acc: 0, xs: xs)\n";
+    let e = parser::parse(src).expect_err("must fail");
+    assert!(e.contains("2 parameter"), "{e}");
+}
+
+#[test]
 fn lists_flow_through_operators() {
     let g = build(include_str!("../../../examples/list.score"));
     let run = exec::run(&g, false).expect("run");

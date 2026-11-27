@@ -1,0 +1,14 @@
+# 容器算子：def 作为模板，按元素跑
+def inc(x: Int) -> (result) {
+  result = add(a: x, b: 1)
+}
+
+def plus(acc: Int, x: Int) -> (result) {
+  result = add(a: acc, b: x)
+}
+
+xs = range(n: 5)
+ys = map(f: inc, xs: xs)
+total = fold(f: plus, acc: 0, xs: ys)
+print(value: ys)
+print(value: total)
