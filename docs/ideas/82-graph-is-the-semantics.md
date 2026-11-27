@@ -14,7 +14,7 @@
 
 - **语义**：图。步骤（call / request / send / end）、控制边（to、when、budget）、子图定义与实例化。行为由这张图决定，不由文本的排列决定。
 - **本体**：二进制图。程序就是这份格式；文本只是生成它的一个来源（可以有多套前端），渲染是它的投影，都不进模型（[87](87-binary-graph-is-the-artifact.md)）。图的文本形式还没定；[71](71-kdl-surface-syntax.md) 的折中（KDL 只覆盖图这一层，表达式层保留自己的文法）是候选前端之一。
-- **叶子**：节点里的计算。方法链、类型、值语义这一套（[11](11-method-chain-primitive.md)–[81](81-scala-surface.md)）降为叶子语言：它算出一个步骤的实参与返回值，不再决定程序的先后。
+- **叶子**：节点分派时的一次纯表达式求值，环境只有本节点的端口、run 参数与字面量。它当前唯一的位置是边谓词（`when`）：`x > 5` 在声明门降级成一个 selector 节点，内核仍只认标签与 `*`；节点实参默认不接受表达式——计算画成节点（[88](88-containers-and-joins.md)），是否放开是策略问题。表达式与值模型的那一半（[11](retired/11-method-chain-primitive.md)–[19](retired/19-block-as-arg.md)、[41](41-json-boundary.md)–[44](retired/44-text-repr.md)）仍描述它；模块、类型类与后端章节不在叶子范围内。
 
 run 不属于语义，它是图的一次执行的日志；「状态由日志导出」是 schematic 已有的语义，这里直接沿用，不进这门语言的模型。
 
@@ -24,6 +24,6 @@ run 不属于语义，它是图的一次执行的日志；「状态由日志导�
 - **图不免费给嵌套**：作用域、闭包、部分应用要么靠子图（[83](83-subgraph-is-a-function.md)），要么留在叶子里。图给的是接线，不是绑定。
 - **收益在写上不兑现**：作者仍然用文本或 JSON 写，图是投影。用鼠标连线的编写方式不在目标内——它把编辑速度换成可视化，那笔账从来没有算平过。
 
-**冲突**：[11](11-method-chain-primitive.md)（调用是语言的原语 → 降为叶子的原语）、[38](38-composition.md)（组合只有链、Fn、合取三种 → 图是第四种载体）、[75](75-rust-surface-syntax.md) / [81](81-scala-surface.md)（两种表面都属于叶子语言）、[73](73-not-general-purpose.md)（定位从「宿主里的脚本」变成「图的宿主语言 + 叶子」）、[76](76-fluency-over-terseness.md)（流畅性优先是表达式语法的判据）。
+**冲突**：[88](88-containers-and-joins.md)（容器让「跑几次」显式）、[89](89-edges.md)（边即数据）、[73](73-not-general-purpose.md)（协调语言的定位）。表达式语言时期的那批对手（方法链、表面语法、组合三说）已归档到 [retired/](retired/README.md)，不再是对手。
 
-**若改掉会动到**：README、[11](11-method-chain-primitive.md)、[21](21-unified-dot-access.md)、[38](38-composition.md)、[61](61-three-hosts.md)、[73](73-not-general-purpose.md)、[75](75-rust-surface-syntax.md)、[81](81-scala-surface.md)、语法总表。
+**若改掉会动到**：README、[83](83-subgraph-is-a-function.md)、[88](88-containers-and-joins.md)、[89](89-edges.md)、[73](73-not-general-purpose.md)、语法总表。

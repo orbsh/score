@@ -26,6 +26,6 @@
 - **层级在产物里消失**：产物只剩线性代码，分层显示与「点进子图」要靠调试信息找回边界。
 - **什么时候值得生成代码要实测**：几十到几百步时，「编译结构 + 解释叶子」通常比生成代码划算；阈值来自测量，不来自推断。
 
-**冲突**：[77](77-bytecode-vm.md)（自建字节码 VM）、[79](79-batch-opcodes.md)（批量操作码）、[51](51-standard-wasm.md)（产物是 wasm 是叶子层的约束）、[52](52-no-optimizer.md)。
+**冲突**：[77](77-bytecode-vm.md)（自建字节码 VM）、[79](79-batch-opcodes.md)（批量操作码）、[51](51-standard-wasm.md)（产物是 wasm 是叶子层的约束）、[52](retired/52-no-optimizer.md)、[88](88-containers-and-joins.md)（容器内没有静态顺序：逐元素的次序由数据与调度器给，不由拓扑序给）。
 
-**若改掉会动到**：后端章节、[61](61-three-hosts.md)、[73](73-not-general-purpose.md) 的性能排序。
+**若改掉会动到**：后端章节、[61](retired/61-three-hosts.md)、[73](73-not-general-purpose.md) 的性能排序。

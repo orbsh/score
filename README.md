@@ -2,9 +2,9 @@
 
 A graph-first language: the language is a binary graph, and text is one source that generates it. **Status: design draft — no implementation yet.**
 
-Design: [docs/ideas/](docs/ideas/README.md) — one document per idea, no verdicts (written in Chinese). The pre-split long draft stays at [docs/design.md](docs/design.md) as history.
+Design: [docs/ideas/](docs/ideas/README.md) — one document per idea; retired ones live under docs/ideas/retired/ (written in Chinese). The pre-split long draft stays at [docs/design.md](docs/design.md) as history.
 
-Core proposition: the semantics is a graph — steps, control edges, subgraphs — and a run is the append-only log of what fired. A step fires when its inputs resolve; nothing is ordered by its position in the text. Subgraphs are the language's functions: a named graph with a typed signature, instantiated by wiring and inlined before it runs. A step's arguments and results are computed in a leaf expression language. The artifact is the graph's binary form: text is a front end that generates it, rendering is a projection of the same bytes, and a subgraph exported from a graph store is a program without a conversion step.
+Core proposition: the semantics is a graph — steps, control edges, subgraphs — and a run is the append-only log of what fired. A step fires when its inputs resolve; nothing is ordered by its position in the text. Subgraphs are the language's functions: a named graph with a typed signature, instantiated by wiring and inlined before it runs. A step's arguments are literals or references to other steps' ports; the only place an expression appears is an edge predicate. The artifact is the graph's binary form: text is a front end that generates it, rendering is a projection of the same bytes, and a subgraph exported from a graph store is a program without a conversion step.
 
 The Lisp correspondence, stated precisely: Lisp gives a program a list representation, and the list is not the semantics — the AST is. Here the binary graph is both the semantics and the interchange format, which Lisp does not have (its AST lives in memory). The gain is not macros but structure: the same program can be rendered, folded level by level, resumed from its document, audited edge by edge, and stored as the graph it is.
 
@@ -12,9 +12,9 @@ Layers:
 
 ```
 layer   what it is                                                        rules live in
-graph   steps, kinds, control edges, budgets, subgraph signatures          the binary plan format; schematic implements the fold today
-text    front ends that generate that binary (KDL, JSON, an editor)        this project (docs/ideas)
-leaf    expressions that compute a step's values: chains, types            this project; whole program lowers to bytecode or wasm
+graph   steps, kinds, control edges, budgets, subgraph signatures         the binary plan format; schematic implements the fold today
+text    front ends that generate that binary (KDL, JSON, an editor)       this project (docs/ideas)
+leaf    the expression language, used at edge predicates                  this project; evaluated by the executor
 ```
 
 Constraints that follow from the graph being the source of truth:
@@ -24,18 +24,19 @@ Constraints that follow from the graph being the source of truth:
 - A `request` step may wait for days, so any lower artifact needs a resumable frame or the run document as its continuation (`85`).
 - The model is schematic's, extended in schematic — never a second parallel model — so a later engine replacement swaps `validate`/`ready`/`advance`, not the format (`87`).
 
-## The leaf layer
+## The leaf
 
-The expression language is the one the earlier drafts described, now scoped to what a node computes: a call is *receiver + name + the arguments the declaration states*, and a type is *data shape + a set of trait labels* with no inheritance chain. Pipes, infix operators and modules are notations of those two rules, not separate mechanisms. Methods are never values and functions only exist as closures, so there is no currying. Surface: Rust syntax over value semantics — no `&`, no `*`, no lifetimes, no borrow checker; where Rust's surface fights fluency, fluency wins.
+The leaf is a pure expression language with one place in the model: an edge's `when` predicate (`x > 5`). The declaration door lowers a predicate to a selector node, so the kernel still only sees labels and `*`. Node arguments are literals or references — computation is drawn as nodes (`88`) — and whether arguments may also take expressions is a policy, not a mechanism.
 
-The leaf's carrier today is a standard wasm module (Wasm 3.0 GC types plus a few WASI imports) run by a Rust engine extension, a browser, or the CLI; a self-built bytecode VM is a candidate (`77`). Compilation is whole-program and linear with no fixed point, and the boundary with the host is bytes only. The graph layer itself lowers to bytecode or another target (`85`); wasm is one instance, not the definition.
+The expression surface is the one the earlier drafts described (a call is receiver + name + the arguments the declaration states; a type is data shape + a set of trait labels); the modules, traits and backend chapters do not apply. Evaluation belongs to the executor: a tree walk first, a bytecode evaluator only if measurement asks for one (`77`, `79`).
 
 ## Layout
 
 ```
 docs/
 ├── ideas/          一个想法一份文档（允许冲突，没有终态）
-├── reference/      语法总表与示例程序（叶子语言）
+│   └── retired/    不采用的方案，头部写为什么
+├── reference/      语法总表与示例程序（谓词表达式）
 └── design.md       拆分前的长文，保留备查
 
 README.md
