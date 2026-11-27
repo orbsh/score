@@ -62,13 +62,7 @@ pub fn read(src: &str) -> Result<Journal, String> {
         let op = text(&obj, "op", n)?;
         let port = text(&obj, "port", n)?;
         let value = match obj.get("value") {
-            Some(Json::Int(i)) => Value::Int(*i),
-            Some(Json::Bool(b)) => Value::Bool(*b),
-            Some(Json::Str(s)) => Value::Text(s.clone()),
-            Some(Json::Null) => Value::Unit,
-            Some(Json::Arr(items)) => {
-                to_list(items).ok_or_else(|| format!("line {}: bad list value", n + 1))?
-            }
+            Some(j) => to_value(j).ok_or_else(|| format!("line {}: bad value", n + 1))?,
             None => return Err(format!("line {}: missing `value`", n + 1)),
         };
         entries.push(Entry {
@@ -89,18 +83,39 @@ fn text(obj: &BTreeMap<String, Json>, key: &str, line: usize) -> Result<String, 
     }
 }
 
-fn to_list(items: &[Json]) -> Option<Value> {
-    let mut out = Vec::with_capacity(items.len());
-    for item in items {
-        out.push(match item {
-            Json::Int(i) => Value::Int(*i),
-            Json::Bool(b) => Value::Bool(*b),
-            Json::Str(s) => Value::Text(s.clone()),
-            Json::Null => Value::Unit,
-            Json::Arr(nested) => to_list(nested)?,
-        });
-    }
-    Some(Value::List(out))
+fn to_value(j: &Json) -> Option<Value> {
+    Some(match j {
+        Json::Int(i) => Value::Int(*i),
+        Json::Bool(b) => Value::Bool(*b),
+        Json::Str(s) => Value::Text(s.clone()),
+        Json::Null => Value::Unit,
+        Json::Arr(items) => {
+            let mut out = Vec::with_capacity(items.len());
+            for item in items {
+                out.push(to_value(item)?);
+            }
+            Value::List(out)
+        }
+        Json::Obj(fields) => {
+            if let (Some(Json::Str(tag)), Some(Json::Obj(payload))) =
+                (fields.get("variant"), fields.get("fields"))
+            {
+                let mut out = BTreeMap::new();
+                for (k, v) in payload {
+                    out.insert(k.clone(), to_value(v)?);
+                }
+                return Some(Value::Variant {
+                    tag: tag.clone(),
+                    fields: out,
+                });
+            }
+            let mut out = BTreeMap::new();
+            for (k, v) in fields {
+                out.insert(k.clone(), to_value(v)?);
+            }
+            Value::Record(out)
+        }
+    })
 }
 
 #[derive(Debug)]
@@ -110,6 +125,7 @@ enum Json {
     Null,
     Str(String),
     Arr(Vec<Json>),
+    Obj(BTreeMap<String, Json>),
 }
 
 struct Parser<'a> {
@@ -156,7 +172,7 @@ impl Parser<'_> {
         match self.peek() {
             Some(b'"') => Ok(Json::Str(self.string()?)),
             Some(b'[') => self.array(),
-            Some(b'{') => Err("a journal value cannot hold an object".to_string()),
+            Some(b'{') => Ok(Json::Obj(self.object()?)),
             Some(b't') => {
                 self.word(b"true")?;
                 Ok(Json::Bool(true))

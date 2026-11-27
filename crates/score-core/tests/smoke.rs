@@ -45,6 +45,79 @@ fn newlines_are_layout() {
 }
 
 #[test]
+fn enums_and_structs_build_tagged_values() {
+    let g = build(include_str!("../../../examples/enum.score"));
+    let run = exec::run(&g, false).expect("run");
+    match run.values.get(&("c".to_string(), "Circle".to_string())) {
+        Some(Value::Variant { tag, fields }) => {
+            assert_eq!(tag, "Circle");
+            assert_eq!(fields.get("r"), Some(&Value::Int(3)));
+        }
+        other => panic!("expected a Circle, got {other:?}"),
+    }
+    match run.values.get(&("p".to_string(), "out".to_string())) {
+        Some(Value::Record(fields)) => {
+            assert_eq!(fields.get("age"), Some(&Value::Int(36)));
+        }
+        other => panic!("expected a record, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_variant_survives_the_journal() {
+    let g = build(include_str!("../../../examples/enum.score"));
+    let run = exec::run(&g, false).expect("run");
+    let text = score_core::journal::write(g.fingerprint(), &run.entries);
+    let back = score_core::journal::read(&text).expect("read");
+    let c = back
+        .entries
+        .iter()
+        .find(|e| e.node == "c")
+        .map(|e| e.value.clone());
+    match c {
+        Some(Value::Variant { tag, fields }) => {
+            assert_eq!(tag, "Circle");
+            assert_eq!(fields.get("r"), Some(&Value::Int(3)));
+        }
+        other => panic!("expected a Circle, got {other:?}"),
+    }
+}
+
+#[test]
+fn records_hold_named_fields() {
+    let g = build(include_str!("../../../examples/record.score"));
+    let run = exec::run(&g, false).expect("run");
+    assert_eq!(
+        run.values.get(&("who".to_string(), "out".to_string())),
+        Some(&Value::Text("ada".to_string()))
+    );
+    assert_eq!(
+        run.values.get(&("age".to_string(), "out".to_string())),
+        Some(&Value::Int(36))
+    );
+}
+
+#[test]
+fn a_record_survives_the_journal() {
+    let g = build(include_str!("../../../examples/record.score"));
+    let run = exec::run(&g, false).expect("run");
+    let text = score_core::journal::write(g.fingerprint(), &run.entries);
+    let back = score_core::journal::read(&text).expect("read");
+    let r = back
+        .entries
+        .iter()
+        .find(|e| e.node == "r")
+        .map(|e| e.value.clone());
+    match r {
+        Some(Value::Record(fields)) => {
+            assert_eq!(fields.get("age"), Some(&Value::Int(36)));
+            assert_eq!(fields.get("name"), Some(&Value::Text("ada".to_string())));
+        }
+        other => panic!("expected a record, got {other:?}"),
+    }
+}
+
+#[test]
 fn a_chain_can_enter_a_def() {
     let g = build(include_str!("../../../examples/chain_def.score"));
     let run = exec::run(&g, false).expect("run");

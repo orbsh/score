@@ -87,6 +87,20 @@ static EQ: Sig = Sig {
     ins: &[("a", Ty::Any), ("b", Ty::Any)],
     outs: &[("out", Ty::Bool)],
 };
+/// A record's fields are its arguments, so it declares no inputs of its own.
+static RECORD: Sig = Sig {
+    ins: &[],
+    outs: &[("out", Ty::Record)],
+};
+static GET: Sig = Sig {
+    ins: &[("r", Ty::Any), ("key", Ty::Text)],
+    outs: &[("out", Ty::Any)],
+};
+
+/// An operator that takes its arguments as fields rather than as named ports.
+pub fn is_variadic(op: &str) -> bool {
+    op == "record"
+}
 
 pub fn signature(op: &str) -> Option<&'static Sig> {
     match op {
@@ -109,6 +123,8 @@ pub fn signature(op: &str) -> Option<&'static Sig> {
         "all" => Some(&ALL),
         "gt" => Some(&GT),
         "eq" => Some(&EQ),
+        "record" => Some(&RECORD),
+        "get" => Some(&GET),
         _ => None,
     }
 }
@@ -222,6 +238,28 @@ pub fn apply(op: &str, args: &BTreeMap<&str, Value>) -> Result<Value, String> {
             }
         }
         "eq" => Ok(Value::Bool(get("a")? == get("b")?)),
+        "record" => {
+            let mut fields = BTreeMap::new();
+            for (name, v) in args {
+                fields.insert((*name).to_string(), v.clone());
+            }
+            Ok(Value::Record(fields))
+        }
+        "get" => {
+            let r = get("r")?;
+            let k = get("key")?;
+            let key = as_text(op, "key", &k)?;
+            match &r {
+                Value::Record(fields) => fields
+                    .get(key)
+                    .cloned()
+                    .ok_or_else(|| format!("`get`: the record has no field `{key}`")),
+                other => Err(format!(
+                    "`get.r` wants Record, got {}",
+                    type_of(other).name()
+                )),
+            }
+        }
         "map" | "fold" | "filter" | "any" | "all" => Err(format!(
             "`{op}` runs a def per element and is driven by the runtime, not by `apply`"
         )),

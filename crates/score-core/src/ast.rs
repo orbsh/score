@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::value::Value;
+use crate::value::{Ty, Value};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Arg {
@@ -74,10 +74,22 @@ pub struct Edge {
     pub budget: Option<u32>,
 }
 
+/// A constructor declared by `data`: the variant name is the identity, the
+/// fields are its payload, and the name doubles as an output port.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Ctor {
+    pub sum: String,
+    pub fields: Vec<(String, Ty)>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Graph {
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
+    /// Constructor set of each `enum`, keyed by variant name.
+    pub ctors: BTreeMap<String, Ctor>,
+    /// Fields of each `struct`; the struct name is also its constructor.
+    pub structs: BTreeMap<String, Vec<(String, Ty)>>,
 }
 
 impl Graph {
@@ -121,6 +133,23 @@ impl Graph {
             field(&mut h, &format!("{:?}", e.guard));
             field(&mut h, if e.ring { "ring" } else { "edge" });
             field(&mut h, &format!("{:?}", e.budget));
+        }
+        for (name, ctor) in &self.ctors {
+            field(&mut h, "d");
+            field(&mut h, name);
+            field(&mut h, &ctor.sum);
+            for (f, t) in &ctor.fields {
+                field(&mut h, f);
+                field(&mut h, t.name());
+            }
+        }
+        for (name, fields) in &self.structs {
+            field(&mut h, "s");
+            field(&mut h, name);
+            for (f, t) in fields {
+                field(&mut h, f);
+                field(&mut h, t.name());
+            }
         }
         h
     }

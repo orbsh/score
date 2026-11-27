@@ -1,0 +1,15 @@
+# 类型定义用大括号：enum 的变体名就是出口端口，struct 的名字就是构造器
+enum Shape {
+  Circle { r: Int }
+  Rect { w: Int, h: Int }
+}
+
+struct Person {
+  name: Text
+  age: Int
+}
+
+c = Circle(r: 3)
+p = Person(name: "ada", age: 36)
+c -> print
+p -> print

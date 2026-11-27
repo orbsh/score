@@ -15,11 +15,23 @@ pub fn validate(g: &Graph) -> Result<(), String> {
     }
 
     for n in &g.nodes {
+        if g.ctors.contains_key(&n.op) || g.structs.contains_key(&n.op) {
+            // A constructor's arguments were checked by the parser.
+            continue;
+        }
         let sig = ops::signature(&n.op).ok_or_else(|| format!("unknown operator `{}`", n.op))?;
         if !sig.outs.iter().any(|(p, _)| *p == n.out_port) && n.op != "param" {
             return Err(format!("`{}` has no output port `{}`", n.op, n.out_port));
         }
         for (port, arg) in &n.args {
+            if ops::is_variadic(&n.op) {
+                if let Arg::Ref(r) = arg
+                    && !by_name.contains_key(r.as_str())
+                {
+                    return Err(format!("unknown node `{r}`"));
+                }
+                continue;
+            }
             let (_, want) = sig
                 .ins
                 .iter()
@@ -70,17 +82,37 @@ pub fn validate(g: &Graph) -> Result<(), String> {
         let tn = by_name
             .get(e.to.0.as_str())
             .ok_or_else(|| format!("edge to unknown node `{}`", e.to.0))?;
-        let ssig = ops::signature(&sn.op).ok_or_else(|| format!("unknown operator `{}`", sn.op))?;
         let tsig = ops::signature(&tn.op).ok_or_else(|| format!("unknown operator `{}`", tn.op))?;
         let sty = if sn.op == "param" {
             &Ty::Any
+        } else if g.ctors.contains_key(&sn.op) {
+            if e.from.1 != sn.op {
+                return Err(format!(
+                    "`{}` only has the port `{}`, not `{}`",
+                    sn.op, sn.op, e.from.1
+                ));
+            }
+            &Ty::Any
+        } else if g.structs.contains_key(&sn.op) {
+            if e.from.1 != "out" {
+                return Err(format!("`{}` only has the port `out`", sn.op));
+            }
+            &Ty::Record
         } else {
+            let ssig =
+                ops::signature(&sn.op).ok_or_else(|| format!("unknown operator `{}`", sn.op))?;
             ssig.outs
                 .iter()
                 .find(|(p, _)| *p == e.from.1)
                 .map(|(_, t)| t)
                 .ok_or_else(|| format!("`{}` has no output port `{}`", sn.op, e.from.1))?
         };
+        if g.ctors.contains_key(&tn.op) || g.structs.contains_key(&tn.op) {
+            return Err(format!(
+                "`{}` is a constructor; it takes no input edge",
+                tn.op
+            ));
+        }
         let (_, tty) = tsig
             .ins
             .iter()
@@ -106,12 +138,17 @@ pub fn validate(g: &Graph) -> Result<(), String> {
         if !e.ring && !seen_in.insert(e.to.clone()) {
             return Err(format!("two edges into `{}.{}`", e.to.0, e.to.1));
         }
-        if let Guard::When(expr) = &e.guard {
-            check_expr(expr, &e.from.0, ssig)?;
+        if let Guard::When(expr) = &e.guard
+            && let Some(src_sig) = ops::signature(&sn.op)
+        {
+            check_expr(expr, &e.from.0, src_sig)?;
         }
     }
 
     for n in &g.nodes {
+        if g.ctors.contains_key(&n.op) || g.structs.contains_key(&n.op) {
+            continue;
+        }
         let sig = ops::signature(&n.op).ok_or_else(|| format!("unknown operator `{}`", n.op))?;
         for (port, _) in sig.ins {
             let has_arg = n.args.contains_key(*port);

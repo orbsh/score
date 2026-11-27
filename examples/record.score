@@ -1,0 +1,6 @@
+# 记录：字段来自实参，get 按名字取
+r = record(name: "ada", age: 36)
+who = get(r: r, key: "name")
+age = get(r: r, key: "age")
+print(value: who)
+print(value: age)

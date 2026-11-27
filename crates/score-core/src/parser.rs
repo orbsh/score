@@ -8,7 +8,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::ast::{Arg, BinOp, Edge, Expr, Graph, Guard, Node};
+use crate::ast::{Arg, BinOp, Ctor, Edge, Expr, Graph, Guard, Node};
 use crate::lexer::{Tok, lex};
 use crate::ops;
 use crate::value::{Ty, Value, accepts, type_of};
@@ -35,14 +35,26 @@ pub fn parse(src: &str) -> Result<Graph, String> {
         lines.push(cur);
     }
 
-    let mut defs: BTreeMap<String, Def> = BTreeMap::new();
+    let mut decls = Decls::default();
     let mut consts: BTreeMap<String, Value> = BTreeMap::new();
-    parse_lines(&lines, &mut defs, &mut consts, None)
+    let mut g = parse_lines(&lines, &mut decls, &mut consts, None)?;
+    g.ctors = decls.ctors;
+    g.structs = decls.structs;
+    Ok(g)
+}
+
+/// Names a program declares before its graph: subgraphs, sum constructors and
+/// structs. All three are visible inside a `def` body, so they travel together.
+#[derive(Default)]
+struct Decls {
+    defs: BTreeMap<String, Def>,
+    ctors: BTreeMap<String, Ctor>,
+    structs: BTreeMap<String, Vec<(String, Ty)>>,
 }
 
 fn parse_lines(
     lines: &[Vec<Tok>],
-    defs: &mut BTreeMap<String, Def>,
+    defs: &mut Decls,
     consts: &mut BTreeMap<String, Value>,
     params: Option<&[(String, Ty)]>,
 ) -> Result<Graph, String> {
@@ -91,7 +103,7 @@ fn parse_lines(
                     return Err(format!("`def {name}` has no closing `}}`"));
                 }
                 let body = parse_lines(&lines[i + 1..j], defs, consts, Some(&def_params))?;
-                defs.insert(
+                defs.defs.insert(
                     name,
                     Def {
                         params: def_params,
@@ -106,6 +118,78 @@ fn parse_lines(
             }
             Tok::Arrow | Tok::Branch | Tok::CondOpen => {
                 apply_arrow(&mut g, line, &head, &mut current, consts, defs, &mut auto)?;
+            }
+            Tok::Ident(word) if word == "enum" => {
+                let name = match line.get(1) {
+                    Some(Tok::Ident(n)) => n.clone(),
+                    _ => return Err("`enum` needs a name".to_string()),
+                };
+                if !matches!(line.get(2), Some(Tok::LBrace)) {
+                    return Err(format!("`enum {name}` needs `{{`"));
+                }
+                let mut j = i + 1;
+                let mut tags: Vec<String> = Vec::new();
+                while j < lines.len() && !(lines[j].len() == 1 && lines[j][0] == Tok::RBrace) {
+                    let v = &lines[j];
+                    let tag = match v.first() {
+                        Some(Tok::Ident(t)) => t.clone(),
+                        other => {
+                            return Err(format!(
+                                "`enum {name}`: expected a variant, got {other:?}"
+                            ));
+                        }
+                    };
+                    let fields = match v.get(1) {
+                        Some(Tok::LBrace) => {
+                            if v.last() != Some(&Tok::RBrace) {
+                                return Err(format!(
+                                    "`enum {name}.{tag}`: close its fields on the same line"
+                                ));
+                            }
+                            parse_fields(&v[2..v.len() - 1])?
+                        }
+                        Some(other) => {
+                            return Err(format!("`enum {name}.{tag}`: unexpected {other:?}"));
+                        }
+                        None => Vec::new(),
+                    };
+                    tags.push(tag.clone());
+                    defs.ctors.insert(
+                        tag,
+                        Ctor {
+                            sum: name.clone(),
+                            fields,
+                        },
+                    );
+                    j += 1;
+                }
+                if j == lines.len() {
+                    return Err(format!("`enum {name}` has no closing `}}`"));
+                }
+                if tags.is_empty() {
+                    return Err(format!("`enum {name}` has no variants"));
+                }
+                i = j;
+            }
+            Tok::Ident(word) if word == "struct" => {
+                let name = match line.get(1) {
+                    Some(Tok::Ident(n)) => n.clone(),
+                    _ => return Err("`struct` needs a name".to_string()),
+                };
+                if !matches!(line.get(2), Some(Tok::LBrace)) {
+                    return Err(format!("`struct {name}` needs `{{`"));
+                }
+                let mut j = i + 1;
+                let mut fields: Vec<(String, Ty)> = Vec::new();
+                while j < lines.len() && !(lines[j].len() == 1 && lines[j][0] == Tok::RBrace) {
+                    fields.extend(parse_fields(&lines[j])?);
+                    j += 1;
+                }
+                if j == lines.len() {
+                    return Err(format!("`struct {name}` has no closing `}}`"));
+                }
+                defs.structs.insert(name, fields);
+                i = j;
             }
             Tok::Ident(name) => match line.get(1) {
                 Some(Tok::Eq) => {
@@ -173,7 +257,7 @@ fn apply_arrow(
     head: &Option<(String, String)>,
     current: &mut Option<(String, String)>,
     consts: &BTreeMap<String, Value>,
-    defs: &BTreeMap<String, Def>,
+    defs: &Decls,
     auto: &mut usize,
 ) -> Result<(), String> {
     match toks.first() {
@@ -294,7 +378,7 @@ fn run_steps(
     toks: &[Tok],
     start: (String, String),
     consts: &BTreeMap<String, Value>,
-    defs: &BTreeMap<String, Def>,
+    defs: &Decls,
     auto: &mut usize,
     first: FirstEdge,
 ) -> Result<(String, String), String> {
@@ -344,7 +428,7 @@ fn parse_step(
     g: &mut Graph,
     toks: &[Tok],
     consts: &BTreeMap<String, Value>,
-    defs: &BTreeMap<String, Def>,
+    defs: &Decls,
     auto: &mut usize,
     hint: Option<String>,
     entry: Option<&(String, String)>,
@@ -451,7 +535,7 @@ fn parse_step(
         }
     }
 
-    if let Some(def) = defs.get(&op) {
+    if let Some(def) = defs.defs.get(&op) {
         // The entry port comes from the port spec, or from the single parameter.
         let entry_port = match &spec_in {
             Some(p) => Some(p.clone()),
@@ -511,6 +595,44 @@ fn parse_step(
         ));
     }
 
+    if let Some(ctor) = defs.ctors.get(&op) {
+        check_fields(g, &op, &ctor.fields, &args)?;
+        g.nodes.push(Node {
+            name: name.clone(),
+            op: op.clone(),
+            args,
+            out_port: op.clone(),
+        });
+        return Ok((
+            Step {
+                name,
+                out_port: op,
+                in_port: None,
+                inlined: false,
+            },
+            i,
+        ));
+    }
+
+    if let Some(fields) = defs.structs.get(&op) {
+        check_fields(g, &op, fields, &args)?;
+        g.nodes.push(Node {
+            name: name.clone(),
+            op: op.clone(),
+            args,
+            out_port: "out".to_string(),
+        });
+        return Ok((
+            Step {
+                name,
+                out_port: "out".to_string(),
+                in_port: None,
+                inlined: false,
+            },
+            i,
+        ));
+    }
+
     let container_arity = match op.as_str() {
         "map" | "filter" | "any" | "all" => Some(1),
         "fold" => Some(2),
@@ -518,7 +640,7 @@ fn parse_step(
     };
     if let Some(want) = container_arity {
         let sub = match args.get("f") {
-            Some(Arg::Ref(target)) => match defs.get(target) {
+            Some(Arg::Ref(target)) => match defs.defs.get(target) {
                 Some(def) => {
                     if def.params.len() != want {
                         return Err(format!(
@@ -755,10 +877,75 @@ fn inline_def(
     Ok(out_node.out_port.clone())
 }
 
+fn parse_fields(toks: &[Tok]) -> Result<Vec<(String, Ty)>, String> {
+    let mut out = Vec::new();
+    let mut i = 0usize;
+    while i < toks.len() {
+        let name = match toks.get(i) {
+            Some(Tok::Ident(n)) => n.clone(),
+            other => return Err(format!("expected a field name, got {other:?}")),
+        };
+        if !matches!(toks.get(i + 1), Some(Tok::Colon)) {
+            return Err(format!("field `{name}` needs `: Type`"));
+        }
+        let ty = parse_ty(toks.get(i + 2))?;
+        out.push((name, ty));
+        i += 3;
+        match toks.get(i) {
+            Some(Tok::Comma) => i += 1,
+            None => break,
+            Some(other) => return Err(format!("expected `,` after a field, got {other:?}")),
+        }
+    }
+    Ok(out)
+}
+
 type DefSig = (String, Vec<(String, Ty)>, Vec<(String, Ty)>);
 
 /// Clone a def body as a template for `map` / `fold`: names are prefixed, the
 /// param nodes stay (the runtime seeds them), and nothing is wired to a caller.
+fn check_fields(
+    g: &Graph,
+    op: &str,
+    fields: &[(String, Ty)],
+    args: &BTreeMap<String, Arg>,
+) -> Result<(), String> {
+    for (f, ty) in fields {
+        let arg = args
+            .get(f)
+            .ok_or_else(|| format!("`{op}` needs `{f}: {}`", ty.name()))?;
+        let got = match arg {
+            Arg::Lit(v) => type_of(v),
+            Arg::Sub(_) => Ty::Any,
+            Arg::Ref(r) => {
+                let rn = g.node(r).ok_or_else(|| format!("unknown node `{r}`"))?;
+                match ops::signature(&rn.op) {
+                    Some(sig) => sig
+                        .outs
+                        .iter()
+                        .find(|(p, _)| *p == rn.out_port)
+                        .map(|(_, t)| *t)
+                        .ok_or_else(|| format!("`{}` has no output `{}`", rn.op, rn.out_port))?,
+                    None => Ty::Any,
+                }
+            }
+        };
+        if !accepts(*ty, got) {
+            return Err(format!(
+                "`{op}.{f}` wants {}, got {}",
+                ty.name(),
+                got.name()
+            ));
+        }
+    }
+    for a in args.keys() {
+        if !fields.iter().any(|(f, _)| f == a) {
+            return Err(format!("`{op}` has no field `{a}`"));
+        }
+    }
+    Ok(())
+}
+
 fn subgraph_from(def: &Def, prefix: &str, op: &str) -> Result<crate::ast::SubGraph, String> {
     if def.outs.len() != 1 {
         return Err(format!("`{op}` wants a def with exactly one output"));

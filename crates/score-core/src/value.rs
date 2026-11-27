@@ -1,5 +1,6 @@
 //! Values and the small type algebra for the first slice: Int / Text / Bool / Unit.
 
+use std::collections::BTreeMap;
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -9,6 +10,12 @@ pub enum Value {
     Bool(bool),
     Unit,
     List(Vec<Value>),
+    Record(BTreeMap<String, Value>),
+    /// A tagged value: the variant name is the identity, the fields its payload.
+    Variant {
+        tag: String,
+        fields: BTreeMap<String, Value>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,6 +25,7 @@ pub enum Ty {
     Bool,
     Unit,
     List,
+    Record,
     Any,
 }
 
@@ -29,6 +37,7 @@ impl Ty {
             Ty::Bool => "Bool",
             Ty::Unit => "Unit",
             Ty::List => "List",
+            Ty::Record => "Record",
             Ty::Any => "Any",
         }
     }
@@ -41,6 +50,8 @@ pub fn type_of(v: &Value) -> Ty {
         Value::Bool(_) => Ty::Bool,
         Value::Unit => Ty::Unit,
         Value::List(_) => Ty::List,
+        Value::Record(_) => Ty::Record,
+        Value::Variant { .. } => Ty::Any,
     }
 }
 
@@ -66,6 +77,32 @@ impl Value {
                 }
                 out.push(']');
                 out
+            }
+            Value::Record(fields) => {
+                let mut out = String::from("{");
+                for (i, (k, v)) in fields.iter().enumerate() {
+                    if i > 0 {
+                        out.push(',');
+                    }
+                    out.push_str(&json_string(k));
+                    out.push(':');
+                    out.push_str(&v.to_json());
+                }
+                out.push('}');
+                out
+            }
+            Value::Variant { tag, fields } => {
+                let mut inner = String::from("{");
+                for (i, (k, v)) in fields.iter().enumerate() {
+                    if i > 0 {
+                        inner.push(',');
+                    }
+                    inner.push_str(&json_string(k));
+                    inner.push(':');
+                    inner.push_str(&v.to_json());
+                }
+                inner.push('}');
+                format!("{{\"variant\":{},\"fields\":{inner}}}", json_string(tag))
             }
         }
     }
@@ -105,6 +142,30 @@ impl fmt::Display for Value {
                     write!(f, "{v}")?;
                 }
                 write!(f, "]")
+            }
+            Value::Record(fields) => {
+                write!(f, "{{")?;
+                for (i, (k, v)) in fields.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{k}: {v}")?;
+                }
+                write!(f, "}}")
+            }
+            Value::Variant { tag, fields } => {
+                write!(f, "{tag}")?;
+                if !fields.is_empty() {
+                    write!(f, " {{")?;
+                    for (i, (k, v)) in fields.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "{k}: {v}")?;
+                    }
+                    write!(f, "}}")?;
+                }
+                Ok(())
             }
         }
     }

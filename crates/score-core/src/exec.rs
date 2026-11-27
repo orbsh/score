@@ -78,13 +78,20 @@ pub fn run_from(
             if seeded.contains(&node.name) {
                 continue;
             }
-            let sig = ops::signature(&node.op)
-                .ok_or_else(|| format!("unknown operator `{}`", node.op))?;
+            let sig = ops::signature(&node.op);
+            if sig.is_none() && !g.ctors.contains_key(&node.op) && !g.structs.contains_key(&node.op)
+            {
+                return Err(format!("unknown operator `{}`", node.op));
+            }
             let mut inputs: BTreeMap<&str, Value> = BTreeMap::new();
             let mut subs: BTreeMap<&str, &SubGraph> = BTreeMap::new();
             let mut marks: Vec<u64> = Vec::new();
             let mut ready = true;
-            for (port, _) in sig.ins {
+            let ports: Vec<&str> = match (sig, ops::is_variadic(&node.op)) {
+                (Some(sig), false) => sig.ins.iter().map(|(p, _)| *p).collect(),
+                _ => node.args.keys().map(|k| k.as_str()).collect(),
+            };
+            for port in &ports {
                 if let Some(arg) = node.args.get(*port) {
                     match arg {
                         Arg::Sub(sub) => {
@@ -127,10 +134,25 @@ pub fn run_from(
             if !ready || fired.get(&node.name) == Some(&marks) {
                 continue;
             }
-            let out = if subs.is_empty() {
-                ops::apply(&node.op, &inputs)?
-            } else {
+            let out = if !subs.is_empty() {
                 run_container(&node.op, &subs, &inputs)?
+            } else if g.ctors.contains_key(&node.op) {
+                Value::Variant {
+                    tag: node.op.clone(),
+                    fields: inputs
+                        .iter()
+                        .map(|(k, v)| ((*k).to_string(), v.clone()))
+                        .collect(),
+                }
+            } else if g.structs.contains_key(&node.op) {
+                Value::Record(
+                    inputs
+                        .iter()
+                        .map(|(k, v)| ((*k).to_string(), v.clone()))
+                        .collect(),
+                )
+            } else {
+                ops::apply(&node.op, &inputs)?
             };
             if trace {
                 println!("run {} ({}) -> {}", node.name, node.op, out);
@@ -143,7 +165,10 @@ pub fn run_from(
                 value: out.clone(),
             });
             seq += 1;
-            let slot = (node.name.clone(), node.out_port.clone());
+            let slot = match &out {
+                Value::Variant { tag, .. } => (node.name.clone(), tag.clone()),
+                _ => (node.name.clone(), node.out_port.clone()),
+            };
             values.insert(slot.clone(), out.clone());
             *stamps.entry(slot.clone()).or_insert(0) += 1;
             deliver(g, &slot, &out, &mut values, &mut stamps, &mut budgets)?;
