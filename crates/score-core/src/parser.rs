@@ -8,7 +8,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::ast::{Arg, BinOp, Ctor, Edge, Expr, Graph, Guard, Node};
+use crate::ast::{Arg, Attrs, BinOp, Ctor, Edge, Expr, Graph, Guard, Node};
 use crate::lexer::{Tok, lex};
 use crate::ops;
 use crate::value::{Ty, Value, accepts, type_of};
@@ -40,6 +40,7 @@ pub fn parse(src: &str) -> Result<Graph, String> {
     let mut g = parse_lines(&lines, &mut decls, &mut consts, None)?;
     g.ctors = decls.ctors;
     g.structs = decls.structs;
+    g.decl_attrs = decls.attrs;
     Ok(g)
 }
 
@@ -50,6 +51,52 @@ struct Decls {
     defs: BTreeMap<String, Def>,
     ctors: BTreeMap<String, Ctor>,
     structs: BTreeMap<String, Vec<(String, Ty)>>,
+    attrs: BTreeMap<String, Attrs>,
+}
+
+/// `@doc("…")` / `@tag(x)` written in front of an element. An attribute is a
+/// compile-time tag: it never becomes a value and never changes what a run
+/// does, so it stays out of the fingerprint.
+fn parse_attrs(toks: &[Tok]) -> Result<(Attrs, usize), String> {
+    let mut out = BTreeMap::new();
+    let mut i = 0usize;
+    while matches!(toks.get(i), Some(Tok::At)) {
+        i += 1;
+        let name = match toks.get(i) {
+            Some(Tok::Ident(n)) => n.clone(),
+            other => return Err(format!("`@` needs a name, got {other:?}")),
+        };
+        i += 1;
+        let mut value = None;
+        if matches!(toks.get(i), Some(Tok::LParen)) {
+            i += 1;
+            match toks.get(i) {
+                Some(Tok::Str(s)) => {
+                    value = Some(s.clone());
+                    i += 1;
+                }
+                Some(Tok::Ident(s)) if s != "true" && s != "false" => {
+                    value = Some(s.clone());
+                    i += 1;
+                }
+                Some(Tok::RParen) => {}
+                other => {
+                    return Err(format!("`@{name}` takes one value, got {other:?}"));
+                }
+            }
+            if !matches!(toks.get(i), Some(Tok::RParen)) {
+                return Err(format!("`@{name}` takes one value"));
+            }
+            i += 1;
+        }
+        if !matches!(name.as_str(), "doc" | "tag") {
+            return Err(format!(
+                "unknown attribute `@{name}`; known attributes are `@doc` and `@tag`"
+            ));
+        }
+        out.insert(name, value);
+    }
+    Ok((out, i))
 }
 
 fn parse_lines(
@@ -74,9 +121,20 @@ fn parse_lines(
     let mut current: Option<(String, String)> = None;
     let mut auto = 0usize;
 
+    let mut pending: Attrs = BTreeMap::new();
     let mut i = 0usize;
     while i < lines.len() {
-        let line = &lines[i];
+        let (line_attrs, off) = parse_attrs(&lines[i])?;
+        let line = &lines[i][off..];
+        if line.is_empty() {
+            // Attributes on a line of their own decorate whatever comes next.
+            pending.extend(line_attrs);
+            i += 1;
+            continue;
+        }
+        let mut attrs = std::mem::take(&mut pending);
+        attrs.extend(line_attrs);
+        let first_node = g.nodes.len();
         match line[0].clone() {
             Tok::Const => {
                 let name = match line.get(1) {
@@ -103,6 +161,10 @@ fn parse_lines(
                     return Err(format!("`def {name}` has no closing `}}`"));
                 }
                 let body = parse_lines(&lines[i + 1..j], defs, consts, Some(&def_params))?;
+                let decorated = std::mem::take(&mut attrs);
+                if !decorated.is_empty() {
+                    defs.attrs.insert(name.clone(), decorated);
+                }
                 defs.defs.insert(
                     name,
                     Def {
@@ -169,6 +231,10 @@ fn parse_lines(
                 if tags.is_empty() {
                     return Err(format!("`enum {name}` has no variants"));
                 }
+                let decorated = std::mem::take(&mut attrs);
+                if !decorated.is_empty() {
+                    defs.attrs.insert(name, decorated);
+                }
                 i = j;
             }
             Tok::Ident(word) if word == "struct" => {
@@ -188,7 +254,11 @@ fn parse_lines(
                 if j == lines.len() {
                     return Err(format!("`struct {name}` has no closing `}}`"));
                 }
-                defs.structs.insert(name, fields);
+                defs.structs.insert(name.clone(), fields);
+                let decorated = std::mem::take(&mut attrs);
+                if !decorated.is_empty() {
+                    defs.attrs.insert(name, decorated);
+                }
                 i = j;
             }
             Tok::Ident(name) => match line.get(1) {
@@ -246,7 +316,17 @@ fn parse_lines(
             },
             other => return Err(format!("unexpected start of line: {other:?}")),
         }
+        if !attrs.is_empty() {
+            if g.nodes.len() == first_node {
+                return Err("an attribute decorated nothing on this line".to_string());
+            }
+            let target = g.nodes[first_node].name.clone();
+            g.node_attrs.insert(target, attrs);
+        }
         i += 1;
+    }
+    if !pending.is_empty() {
+        return Err("an attribute decorated nothing".to_string());
     }
     Ok(g)
 }

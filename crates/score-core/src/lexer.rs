@@ -84,8 +84,16 @@ pub fn lex(src: &str) -> Result<Vec<(usize, Tok)>, String> {
                             i += 1;
                         }
                         ch => {
-                            s.push(ch);
-                            i += 1;
+                            if ch.is_ascii() {
+                                s.push(ch);
+                                i += 1;
+                            } else {
+                                let rest = std::str::from_utf8(&b[i..])
+                                    .map_err(|_| format!("line {start}: bad utf-8"))?;
+                                let c = rest.chars().next().expect("non-empty");
+                                s.push(c);
+                                i += c.len_utf8();
+                            }
                         }
                     }
                 }

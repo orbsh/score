@@ -1,0 +1,9 @@
+# 装饰器是编译期标签：@doc 和 @tag 都不进指纹，也不改变任何一次运行
+@doc("把参数加倍")
+def double(x: Int) -> (result) {
+  result = add(a: x, b: x)
+}
+
+@tag("seed")
+n = lit(value: 21)
+n -> double -> print

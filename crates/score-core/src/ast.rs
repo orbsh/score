@@ -82,6 +82,11 @@ pub struct Ctor {
     pub fields: Vec<(String, Ty)>,
 }
 
+/// A constructor set of an `enum`, keyed by variant name: the variant name is
+/// the identity, the fields are its payload, and the name doubles as an output
+/// port. See `Ctor`.
+pub type Attrs = BTreeMap<String, Option<String>>;
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Graph {
     pub nodes: Vec<Node>,
@@ -90,6 +95,10 @@ pub struct Graph {
     pub ctors: BTreeMap<String, Ctor>,
     /// Fields of each `struct`; the struct name is also its constructor.
     pub structs: BTreeMap<String, Vec<(String, Ty)>>,
+    /// `@doc` / `@tag` written above a node, keyed by the node's name.
+    pub node_attrs: BTreeMap<String, Attrs>,
+    /// The same, written above a declaration and keyed by its name.
+    pub decl_attrs: BTreeMap<String, Attrs>,
 }
 
 impl Graph {

@@ -45,6 +45,27 @@ fn newlines_are_layout() {
 }
 
 #[test]
+fn attributes_are_tags_on_declarations_and_nodes() {
+    let g = build(include_str!("../../../examples/attrs.score"));
+    assert_eq!(
+        g.decl_attrs.get("double").and_then(|a| a.get("doc")),
+        Some(&Some("把参数加倍".to_string()))
+    );
+    assert_eq!(
+        g.node_attrs.get("n").and_then(|a| a.get("tag")),
+        Some(&Some("seed".to_string()))
+    );
+    let run = exec::run(&g, false).expect("run");
+    assert!(run.entries.iter().any(|e| e.node == "double#1"));
+}
+
+#[test]
+fn an_unknown_attribute_is_rejected() {
+    let e = parser::parse("@log(off)\nn = lit(value: 1)\n").expect_err("parse");
+    assert!(e.contains("unknown attribute `@log`"), "{e}");
+}
+
+#[test]
 fn enums_and_structs_build_tagged_values() {
     let g = build(include_str!("../../../examples/enum.score"));
     let run = exec::run(&g, false).expect("run");
