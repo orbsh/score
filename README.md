@@ -13,9 +13,9 @@ cargo run -p score-cli -- validate examples/sum.score
 cargo run -p score-cli -- run examples/sum.score --trace
 ```
 
-Implemented today: the v0 surface (bindings, `<in|out>` ports, `->` / `-->` / `-[cond]->`, `const`), validation (ports, types, one edge per input, a `[*]` arm for every conditional branch), and a worklist runtime with six in-process operators (`lit`, `add`, `concat`, `upper`, `len`, `print`).
+Implemented today: the v0 surface (bindings, `<in|out>` ports, `->` / `-->` / `-[cond]->`, `const`, `def` with inlining), validation (ports, types, one edge per input, a `[*]` arm for every conditional branch), and a worklist runtime with six in-process operators (`lit`, `add`, `concat`, `upper`, `len`, `print`).
 
-Not implemented yet: `def` subgraphs, containers, rings, records and sums, okm sources.
+Not implemented yet: containers, rings, records and sums, okm sources. `def` exists in a first form — parameters are supplied as arguments, the output is picked by name, and recursion is rejected (definitions must precede their calls, which makes a cycle impossible).
 
 Core proposition: the semantics is a graph — steps, control edges, subgraphs — and a run is the append-only log of what fired. A step fires when its inputs resolve; nothing is ordered by its position in the text. Subgraphs are the language's functions: a named graph with a typed signature, instantiated by wiring and inlined before it runs. A step's arguments are literals or references to other steps' ports; the only place an expression appears is an edge predicate. The artifact is the graph's binary form: text is a front end that generates it, rendering is a projection of the same bytes, and a subgraph exported from a graph store is a program without a conversion step.
 

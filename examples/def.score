@@ -1,0 +1,8 @@
+# def：签名加体，调用点内联
+def double(x: Int) -> (result) {
+  result = add(a: x, b: x)
+}
+
+n = lit(value: 21)
+m = double(x: n)
+print(value: m)

@@ -45,6 +45,34 @@ fn newlines_are_layout() {
 }
 
 #[test]
+fn def_inlines_at_the_call_site() {
+    let g = build(include_str!("../../../examples/def.score"));
+    let run = exec::run(&g, false).expect("run");
+    assert_eq!(
+        run.values.get(&("m".to_string(), "out".to_string())),
+        Some(&Value::Int(42))
+    );
+}
+
+#[test]
+fn def_accepts_a_literal_argument() {
+    let src = "def double(x: Int) -> (result) {\n  result = add(a: x, b: x)\n}\nm = double(x: 5)\n";
+    let g = build(src);
+    let run = exec::run(&g, false).expect("run");
+    assert_eq!(
+        run.values.get(&("m".to_string(), "out".to_string())),
+        Some(&Value::Int(10))
+    );
+}
+
+#[test]
+fn def_with_a_missing_argument_is_rejected() {
+    let src = "def double(x: Int) -> (result) {\n  result = add(a: x, b: x)\n}\nn = lit(value: 1)\nm = double()\n";
+    let e = parser::parse(src).expect_err("must be invalid");
+    assert!(e.contains("needs `x"), "{e}");
+}
+
+#[test]
 fn both_argument_and_edge_is_rejected() {
     let src = "a = lit(value: 1)\nm = add(a: a, b: 2)\nm -> add<a|out>(a: 3)\n";
     let g = parser::parse(src).expect("parse");

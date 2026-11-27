@@ -2,13 +2,22 @@
 //!
 //! The chain state is `(head, current)`: a line starting with `->` continues `current`,
 //! `-->` and `-[expr]->` restart from `head`.
+//!
+//! `def` bodies are parsed into their own graph and inlined at the call site, so the
+//! graph that leaves this module has no subgraphs in it.
 
 use std::collections::BTreeMap;
 
 use crate::ast::{Arg, BinOp, Edge, Expr, Graph, Guard, Node};
 use crate::lexer::{Tok, lex};
 use crate::ops;
-use crate::value::Value;
+use crate::value::{Ty, Value, accepts, type_of};
+
+struct Def {
+    params: Vec<(String, Ty)>,
+    outs: Vec<(String, Ty)>,
+    body: Graph,
+}
 
 pub fn parse(src: &str) -> Result<Graph, String> {
     let toks = lex(src)?;
@@ -26,13 +35,36 @@ pub fn parse(src: &str) -> Result<Graph, String> {
         lines.push(cur);
     }
 
-    let mut g = Graph::default();
+    let mut defs: BTreeMap<String, Def> = BTreeMap::new();
     let mut consts: BTreeMap<String, Value> = BTreeMap::new();
+    parse_lines(&lines, &mut defs, &mut consts, None)
+}
+
+fn parse_lines(
+    lines: &[Vec<Tok>],
+    defs: &mut BTreeMap<String, Def>,
+    consts: &mut BTreeMap<String, Value>,
+    params: Option<&[(String, Ty)]>,
+) -> Result<Graph, String> {
+    let mut g = Graph::default();
+    if let Some(ps) = params {
+        for (name, _) in ps {
+            g.nodes.push(Node {
+                name: name.clone(),
+                op: "param".to_string(),
+                args: BTreeMap::new(),
+                out_port: name.clone(),
+            });
+        }
+    }
+
     let mut head: Option<(String, String)> = None;
     let mut current: Option<(String, String)> = None;
     let mut auto = 0usize;
 
-    for line in lines {
+    let mut i = 0usize;
+    while i < lines.len() {
+        let line = &lines[i];
         match line[0].clone() {
             Tok::Const => {
                 let name = match line.get(1) {
@@ -46,17 +78,45 @@ pub fn parse(src: &str) -> Result<Graph, String> {
                     .ok_or_else(|| format!("`const {name}` needs a literal"))?;
                 consts.insert(name, value);
             }
-            Tok::Def => return Err("`def` is not implemented in this slice".to_string()),
+            Tok::Def => {
+                if params.is_some() {
+                    return Err("a `def` cannot be nested".to_string());
+                }
+                let (name, def_params, def_outs) = parse_def_header(&line[1..])?;
+                let mut j = i + 1;
+                while j < lines.len() && !(lines[j].len() == 1 && lines[j][0] == Tok::RBrace) {
+                    j += 1;
+                }
+                if j == lines.len() {
+                    return Err(format!("`def {name}` has no closing `}}`"));
+                }
+                let body = parse_lines(&lines[i + 1..j], defs, consts, Some(&def_params))?;
+                defs.insert(
+                    name,
+                    Def {
+                        params: def_params,
+                        outs: def_outs,
+                        body,
+                    },
+                );
+                i = j;
+            }
             Tok::LBrace | Tok::RBrace => {
                 return Err("unexpected brace at the top level".to_string());
             }
             Tok::Arrow | Tok::Branch | Tok::CondOpen => {
-                apply_arrow(&mut g, &line, &head, &mut current, &consts, &mut auto)?;
+                apply_arrow(&mut g, line, &head, &mut current, consts, defs, &mut auto)?;
             }
             Tok::Ident(name) => match line.get(1) {
                 Some(Tok::Eq) => {
-                    let (step, used) =
-                        parse_step(&mut g, &line[2..], &consts, &mut auto, Some(name.clone()))?;
+                    let (step, used) = parse_step(
+                        &mut g,
+                        &line[2..],
+                        consts,
+                        defs,
+                        &mut auto,
+                        Some(name.clone()),
+                    )?;
                     if used != line[2..].len() {
                         return Err(format!("trailing tokens after the call to `{name}`"));
                     }
@@ -64,7 +124,7 @@ pub fn parse(src: &str) -> Result<Graph, String> {
                     current = head.clone();
                 }
                 Some(Tok::LParen) | Some(Tok::Lt) => {
-                    let (step, used) = parse_step(&mut g, &line, &consts, &mut auto, None)?;
+                    let (step, used) = parse_step(&mut g, line, consts, defs, &mut auto, None)?;
                     if used != line.len() {
                         return Err(format!("trailing tokens after the call to `{}`", step.name));
                     }
@@ -78,7 +138,15 @@ pub fn parse(src: &str) -> Result<Graph, String> {
                     let pair = (name.clone(), node.out_port.clone());
                     head = Some(pair.clone());
                     current = Some(pair);
-                    apply_arrow(&mut g, &line[1..], &head, &mut current, &consts, &mut auto)?;
+                    apply_arrow(
+                        &mut g,
+                        &line[1..],
+                        &head,
+                        &mut current,
+                        consts,
+                        defs,
+                        &mut auto,
+                    )?;
                 }
                 None => {
                     let node = g
@@ -92,6 +160,7 @@ pub fn parse(src: &str) -> Result<Graph, String> {
             },
             other => return Err(format!("unexpected start of line: {other:?}")),
         }
+        i += 1;
     }
     Ok(g)
 }
@@ -102,6 +171,7 @@ fn apply_arrow(
     head: &Option<(String, String)>,
     current: &mut Option<(String, String)>,
     consts: &BTreeMap<String, Value>,
+    defs: &BTreeMap<String, Def>,
     auto: &mut usize,
 ) -> Result<(), String> {
     match toks.first() {
@@ -112,6 +182,7 @@ fn apply_arrow(
                 &toks[1..],
                 start,
                 consts,
+                defs,
                 auto,
                 Guard::Always,
             )?);
@@ -123,6 +194,7 @@ fn apply_arrow(
                 &toks[1..],
                 start,
                 consts,
+                defs,
                 auto,
                 Guard::Always,
             )?);
@@ -143,6 +215,7 @@ fn apply_arrow(
                 &toks[close + 1..],
                 start,
                 consts,
+                defs,
                 auto,
                 guard,
             )?);
@@ -156,6 +229,7 @@ struct Step {
     name: String,
     out_port: String,
     in_port: Option<String>,
+    inlined: bool,
 }
 
 fn run_steps(
@@ -163,6 +237,7 @@ fn run_steps(
     toks: &[Tok],
     start: (String, String),
     consts: &BTreeMap<String, Value>,
+    defs: &BTreeMap<String, Def>,
     auto: &mut usize,
     first_guard: Guard,
 ) -> Result<(String, String), String> {
@@ -173,23 +248,25 @@ fn run_steps(
     let mut rest = toks;
     let mut first = true;
     loop {
-        let (step, used) = parse_step(g, rest, consts, auto, None)?;
-        let in_port = step.in_port.clone().ok_or_else(|| {
-            format!(
-                "`{}` needs an explicit entry port: write `<in|out>`",
-                step.name
-            )
-        })?;
-        let guard = if first {
-            first_guard.clone()
-        } else {
-            Guard::Always
-        };
-        g.edges.push(Edge {
-            from: src.clone(),
-            to: (step.name.clone(), in_port),
-            guard,
-        });
+        let (step, used) = parse_step(g, rest, consts, defs, auto, None)?;
+        if !step.inlined {
+            let in_port = step.in_port.clone().ok_or_else(|| {
+                format!(
+                    "`{}` needs an explicit entry port: write `<in|out>`",
+                    step.name
+                )
+            })?;
+            let guard = if first {
+                first_guard.clone()
+            } else {
+                Guard::Always
+            };
+            g.edges.push(Edge {
+                from: src.clone(),
+                to: (step.name.clone(), in_port),
+                guard,
+            });
+        }
         src = (step.name.clone(), step.out_port.clone());
         rest = &rest[used..];
         first = false;
@@ -208,6 +285,7 @@ fn parse_step(
     g: &mut Graph,
     toks: &[Tok],
     consts: &BTreeMap<String, Value>,
+    defs: &BTreeMap<String, Def>,
     auto: &mut usize,
     hint: Option<String>,
 ) -> Result<(Step, usize), String> {
@@ -224,7 +302,6 @@ fn parse_step(
         other => return Err(format!("expected an operator, got {other:?}")),
     };
     i += 1;
-    let sig = ops::signature(&op).ok_or_else(|| format!("unknown operator `{op}`"))?;
 
     let mut spec_in = None;
     let mut spec_out = None;
@@ -307,6 +384,27 @@ fn parse_step(
         }
     }
 
+    if let Some(def) = defs.get(&op) {
+        let bind =
+            binding.ok_or_else(|| format!("a def call needs a name: write `n = {op}(...)`"))?;
+        if spec_in.is_some() {
+            return Err(format!(
+                "`{op}` takes its inputs as arguments; chaining into a def is not implemented"
+            ));
+        }
+        let out_port = inline_def(g, def, &op, &bind, &args, spec_out.as_deref())?;
+        return Ok((
+            Step {
+                name: bind,
+                out_port,
+                in_port: None,
+                inlined: true,
+            },
+            i,
+        ));
+    }
+
+    let sig = ops::signature(&op).ok_or_else(|| format!("unknown operator or def `{op}`"))?;
     let name = match binding {
         Some(n) => n,
         None => {
@@ -329,9 +427,265 @@ fn parse_step(
             name,
             out_port,
             in_port,
+            inlined: false,
         },
         i,
     ))
+}
+
+/// Inline a subgraph at the call site and return the out port of the node that
+/// carries the result (the node is renamed to the call's binding).
+fn inline_def(
+    g: &mut Graph,
+    def: &Def,
+    op_name: &str,
+    bind: &str,
+    args: &BTreeMap<String, Arg>,
+    spec_out: Option<&str>,
+) -> Result<String, String> {
+    let out_name = match spec_out {
+        Some(name) => {
+            if !def.outs.iter().any(|(o, _)| o == name) {
+                return Err(format!("`{op_name}` has no output `{name}`"));
+            }
+            name.to_string()
+        }
+        None if def.outs.len() == 1 => def.outs[0].0.clone(),
+        None => {
+            let names: Vec<&str> = def.outs.iter().map(|(o, _)| o.as_str()).collect();
+            return Err(format!(
+                "`{op_name}` has several outputs ({}); pick one with `<|name>`",
+                names.join(", ")
+            ));
+        }
+    };
+
+    for (p, ty) in &def.params {
+        let arg = args
+            .get(p)
+            .ok_or_else(|| format!("`{op_name}` needs `{p}: {}`", ty.name()))?;
+        let got = match arg {
+            Arg::Lit(v) => type_of(v),
+            Arg::Ref(r) => {
+                let rn = g.node(r).ok_or_else(|| format!("unknown node `{r}`"))?;
+                let rsig = ops::signature(&rn.op)
+                    .ok_or_else(|| format!("`{}` cannot feed `{op_name}.{p}`", rn.op))?;
+                rsig.outs
+                    .iter()
+                    .find(|(o, _)| *o == rn.out_port)
+                    .map(|(_, t)| *t)
+                    .ok_or_else(|| format!("`{}` has no output `{}`", rn.op, rn.out_port))?
+            }
+        };
+        if !accepts(*ty, got) {
+            return Err(format!(
+                "`{op_name}.{p}` wants {}, got {}",
+                ty.name(),
+                got.name()
+            ));
+        }
+    }
+    for p in args.keys() {
+        if !def.params.iter().any(|(name, _)| name == p) {
+            return Err(format!("`{op_name}` has no input `{p}`"));
+        }
+    }
+
+    let mut rename: BTreeMap<String, String> = BTreeMap::new();
+    for n in &def.body.nodes {
+        let new_name = if n.name == out_name {
+            bind.to_string()
+        } else {
+            format!("{bind}/{}", n.name)
+        };
+        rename.insert(n.name.clone(), new_name);
+    }
+
+    // Param sources: a literal becomes a lit node, a reference is wired directly.
+    let mut resolved: BTreeMap<String, (String, String)> = BTreeMap::new();
+    for (p, _) in &def.params {
+        match args.get(p) {
+            Some(Arg::Ref(r)) => {
+                let rn = g.node(r).ok_or_else(|| format!("unknown node `{r}`"))?;
+                resolved.insert(p.clone(), (r.clone(), rn.out_port.clone()));
+            }
+            _ => {
+                resolved.insert(p.clone(), (rename[p].clone(), "out".to_string()));
+            }
+        }
+    }
+
+    for n in &def.body.nodes {
+        if n.op == "param" {
+            match args.get(&n.name) {
+                Some(Arg::Ref(_)) => continue,
+                _ => {
+                    let mut args2 = BTreeMap::new();
+                    args2.insert(
+                        "value".to_string(),
+                        args.get(&n.name).cloned().unwrap_or(Arg::Lit(Value::Unit)),
+                    );
+                    g.nodes.push(Node {
+                        name: rename[&n.name].clone(),
+                        op: "lit".to_string(),
+                        args: args2,
+                        out_port: "out".to_string(),
+                    });
+                }
+            }
+            continue;
+        }
+        let mut args2 = BTreeMap::new();
+        for (port, arg) in &n.args {
+            let arg2 = match arg {
+                Arg::Lit(v) => Arg::Lit(v.clone()),
+                Arg::Ref(r) => match resolved.get(r) {
+                    Some((node, _)) => Arg::Ref(node.clone()),
+                    None => Arg::Ref(
+                        rename
+                            .get(r)
+                            .cloned()
+                            .ok_or_else(|| format!("`{r}` is not a node of `{op_name}`"))?,
+                    ),
+                },
+            };
+            args2.insert(port.clone(), arg2);
+        }
+        g.nodes.push(Node {
+            name: rename[&n.name].clone(),
+            op: n.op.clone(),
+            args: args2,
+            out_port: n.out_port.clone(),
+        });
+    }
+
+    for e in &def.body.edges {
+        let from = match resolved.get(&e.from.0) {
+            Some(pair) => pair.clone(),
+            None => (
+                rename
+                    .get(&e.from.0)
+                    .cloned()
+                    .ok_or_else(|| format!("`{}` is not a node of `{op_name}`", e.from.0))?,
+                e.from.1.clone(),
+            ),
+        };
+        let to = (
+            rename
+                .get(&e.to.0)
+                .cloned()
+                .ok_or_else(|| format!("`{}` is not a node of `{op_name}`", e.to.0))?,
+            e.to.1.clone(),
+        );
+        g.edges.push(Edge {
+            from,
+            to,
+            guard: e.guard.clone(),
+        });
+    }
+
+    let out_node = def
+        .body
+        .node(&out_name)
+        .ok_or_else(|| format!("`{op_name}` never binds its output `{out_name}`"))?;
+    Ok(out_node.out_port.clone())
+}
+
+type DefSig = (String, Vec<(String, Ty)>, Vec<(String, Ty)>);
+
+fn parse_def_header(toks: &[Tok]) -> Result<DefSig, String> {
+    let mut i = 0usize;
+    let name = match toks.get(i) {
+        Some(Tok::Ident(n)) => n.clone(),
+        other => return Err(format!("expected a def name, got {other:?}")),
+    };
+    i += 1;
+    if !matches!(toks.get(i), Some(Tok::LParen)) {
+        return Err(format!("`def {name}` needs a parameter list"));
+    }
+    i += 1;
+    let mut params: Vec<(String, Ty)> = Vec::new();
+    loop {
+        match toks.get(i) {
+            Some(Tok::RParen) => {
+                i += 1;
+                break;
+            }
+            Some(Tok::Ident(p)) => {
+                let p = p.clone();
+                if !matches!(toks.get(i + 1), Some(Tok::Colon)) {
+                    return Err(format!("`def {name}`: `{p}` needs `: Type`"));
+                }
+                let ty = parse_ty(toks.get(i + 2))?;
+                params.push((p, ty));
+                i += 3;
+                match toks.get(i) {
+                    Some(Tok::Comma) => i += 1,
+                    Some(Tok::RParen) => {
+                        i += 1;
+                        break;
+                    }
+                    other => {
+                        return Err(format!("`def {name}`: expected `,` or `)`, got {other:?}"));
+                    }
+                }
+            }
+            other => return Err(format!("`def {name}`: expected a parameter, got {other:?}")),
+        }
+    }
+    if !matches!(toks.get(i), Some(Tok::Arrow)) {
+        return Err(format!("`def {name}` needs `->` before its outputs"));
+    }
+    i += 1;
+    if !matches!(toks.get(i), Some(Tok::LParen)) {
+        return Err(format!("`def {name}` needs an output list"));
+    }
+    i += 1;
+    let mut outs: Vec<(String, Ty)> = Vec::new();
+    loop {
+        match toks.get(i) {
+            Some(Tok::RParen) => break,
+            Some(Tok::Ident(o)) => {
+                let o = o.clone();
+                let ty = if matches!(toks.get(i + 1), Some(Tok::Colon)) {
+                    let t = parse_ty(toks.get(i + 2))?;
+                    i += 3;
+                    t
+                } else {
+                    i += 1;
+                    Ty::Any
+                };
+                outs.push((o, ty));
+                match toks.get(i) {
+                    Some(Tok::Comma) => i += 1,
+                    Some(Tok::RParen) => break,
+                    other => {
+                        return Err(format!("`def {name}`: expected `,` or `)`, got {other:?}"));
+                    }
+                }
+            }
+            other => {
+                return Err(format!(
+                    "`def {name}`: expected an output name, got {other:?}"
+                ));
+            }
+        }
+    }
+    Ok((name, params, outs))
+}
+
+fn parse_ty(tok: Option<&Tok>) -> Result<Ty, String> {
+    match tok {
+        Some(Tok::Ident(n)) => match n.as_str() {
+            "Int" => Ok(Ty::Int),
+            "Text" => Ok(Ty::Text),
+            "Bool" => Ok(Ty::Bool),
+            "Unit" => Ok(Ty::Unit),
+            "Any" => Ok(Ty::Any),
+            other => Err(format!("unknown type `{other}`")),
+        },
+        other => Err(format!("expected a type, got {other:?}")),
+    }
 }
 
 fn literal(tok: Option<&Tok>) -> Option<Value> {
