@@ -68,6 +68,10 @@ pub struct Edge {
     pub from: (String, String),
     pub to: (String, String),
     pub guard: Guard,
+    /// A back edge: it may carry a value more than once, which is what makes a
+    /// ring turn. `budget` caps the deliveries; `None` means unbounded.
+    pub ring: bool,
+    pub budget: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -115,6 +119,8 @@ impl Graph {
             field(&mut h, &e.to.0);
             field(&mut h, &e.to.1);
             field(&mut h, &format!("{:?}", e.guard));
+            field(&mut h, if e.ring { "ring" } else { "edge" });
+            field(&mut h, &format!("{:?}", e.budget));
         }
         h
     }

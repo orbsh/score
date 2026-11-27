@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::ast::{Arg, BinOp, Edge, Expr, Graph, Guard, SubGraph};
+use crate::ast::{Arg, BinOp, Expr, Graph, Guard, SubGraph};
 use crate::ops;
 use crate::value::{Value, type_of};
 
@@ -38,7 +38,16 @@ pub fn run_from(
     seq_base: usize,
 ) -> Result<Run, String> {
     let mut values: BTreeMap<(String, String), Value> = seed.clone();
-    let mut done: BTreeSet<String> = BTreeSet::new();
+    let mut stamps: BTreeMap<(String, String), u64> = BTreeMap::new();
+    for key in seed.keys() {
+        stamps.insert(key.clone(), 1);
+    }
+    let mut budgets: Vec<Option<u32>> = g
+        .edges
+        .iter()
+        .map(|e| if e.ring { e.budget } else { None })
+        .collect();
+    let mut seeded: BTreeSet<String> = BTreeSet::new();
     for (node, port) in seed.keys() {
         let n = g.node(node).ok_or_else(|| {
             format!("the journal has `{node}`, which is not a node of this graph")
@@ -49,40 +58,49 @@ pub fn run_from(
                 n.out_port
             ));
         }
-        done.insert(node.clone());
+        seeded.insert(node.clone());
     }
-    for ((node, port), v) in seed {
-        deliver(g, node, port, v, &mut values)?;
+    for (slot, v) in seed {
+        deliver(g, slot, v, &mut values, &mut stamps, &mut budgets)?;
     }
 
+    // The stamps each node's inputs carried at its last firing: a node fires
+    // again only when one of them moved, which is what turns a ring.
+    let mut fired: BTreeMap<String, Vec<u64>> = BTreeMap::new();
     let mut order: Vec<String> = Vec::new();
     let mut entries: Vec<Entry> = Vec::new();
     let mut seq = seq_base;
+    let mut fires = 0usize;
 
     loop {
         let mut progress = false;
         for node in &g.nodes {
-            if done.contains(&node.name) {
+            if seeded.contains(&node.name) {
                 continue;
             }
             let sig = ops::signature(&node.op)
                 .ok_or_else(|| format!("unknown operator `{}`", node.op))?;
             let mut inputs: BTreeMap<&str, Value> = BTreeMap::new();
             let mut subs: BTreeMap<&str, &SubGraph> = BTreeMap::new();
+            let mut marks: Vec<u64> = Vec::new();
             let mut ready = true;
             for (port, _) in sig.ins {
                 if let Some(arg) = node.args.get(*port) {
                     match arg {
                         Arg::Sub(sub) => {
                             subs.insert(*port, sub);
+                            marks.push(0);
                         }
                         Arg::Lit(v) => {
                             inputs.insert(*port, v.clone());
+                            marks.push(0);
                         }
                         Arg::Ref(r) => {
                             let rn = g.node(r).ok_or_else(|| format!("unknown node `{r}`"))?;
-                            match values.get(&(r.clone(), rn.out_port.clone())) {
+                            let key = (r.clone(), rn.out_port.clone());
+                            match values.get(&key) {
                                 Some(v) => {
+                                    marks.push(stamps.get(&key).copied().unwrap_or(0));
                                     inputs.insert(*port, v.clone());
                                 }
                                 None => {
@@ -92,14 +110,21 @@ pub fn run_from(
                             }
                         }
                     }
-                } else if let Some(v) = values.get(&(node.name.clone(), (*port).to_string())) {
-                    inputs.insert(*port, v.clone());
                 } else {
-                    ready = false;
-                    break;
+                    let key = (node.name.clone(), (*port).to_string());
+                    match values.get(&key) {
+                        Some(v) => {
+                            marks.push(stamps.get(&key).copied().unwrap_or(0));
+                            inputs.insert(*port, v.clone());
+                        }
+                        None => {
+                            ready = false;
+                            break;
+                        }
+                    }
                 }
             }
-            if !ready {
+            if !ready || fired.get(&node.name) == Some(&marks) {
                 continue;
             }
             let out = if subs.is_empty() {
@@ -118,10 +143,18 @@ pub fn run_from(
                 value: out.clone(),
             });
             seq += 1;
-            values.insert((node.name.clone(), node.out_port.clone()), out.clone());
-            deliver(g, &node.name, &node.out_port, &out, &mut values)?;
-            done.insert(node.name.clone());
+            let slot = (node.name.clone(), node.out_port.clone());
+            values.insert(slot.clone(), out.clone());
+            *stamps.entry(slot.clone()).or_insert(0) += 1;
+            deliver(g, &slot, &out, &mut values, &mut stamps, &mut budgets)?;
+            fired.insert(node.name.clone(), marks);
             order.push(node.name.clone());
+            fires += 1;
+            if fires > 1_000_000 {
+                return Err(
+                    "the run passed 1,000,000 firings; a ring is not terminating".to_string(),
+                );
+            }
             progress = true;
         }
         if !progress {
@@ -132,7 +165,7 @@ pub fn run_from(
     let skipped: Vec<String> = g
         .nodes
         .iter()
-        .filter(|n| !done.contains(&n.name))
+        .filter(|n| !fired.contains_key(&n.name) && !seeded.contains(&n.name))
         .map(|n| n.name.clone())
         .collect();
 
@@ -194,38 +227,58 @@ fn run_container(
 
 fn deliver(
     g: &Graph,
-    src_node: &str,
-    src_port: &str,
+    src: &(String, String),
     v: &Value,
     values: &mut BTreeMap<(String, String), Value>,
+    stamps: &mut BTreeMap<(String, String), u64>,
+    budgets: &mut [Option<u32>],
 ) -> Result<(), String> {
-    let edges: Vec<&Edge> = g
+    let ids: Vec<usize> = g
         .edges
         .iter()
-        .filter(|e| e.from.0 == src_node && e.from.1 == src_port)
+        .enumerate()
+        .filter(|(_, e)| &e.from == src)
+        .map(|(i, _)| i)
         .collect();
-    if edges.is_empty() {
+    if ids.is_empty() {
         return Ok(());
     }
-    let exclusive = edges
+    let exclusive = ids
         .iter()
-        .any(|e| matches!(e.guard, Guard::When(_) | Guard::Fallback));
-    if !exclusive {
-        for e in &edges {
-            values.insert(e.to.clone(), v.clone());
+        .any(|i| matches!(g.edges[*i].guard, Guard::When(_) | Guard::Fallback));
+    let mut chosen: Vec<usize> = Vec::new();
+    if exclusive {
+        for i in &ids {
+            if let Guard::When(expr) = &g.edges[*i].guard
+                && truthy(&eval(expr, &src.0, values)?)?
+            {
+                chosen.push(*i);
+                break;
+            }
         }
-        return Ok(());
-    }
-    for e in &edges {
-        if let Guard::When(expr) = &e.guard
-            && truthy(&eval(expr, src_node, values)?)?
+        if chosen.is_empty()
+            && let Some(i) = ids
+                .iter()
+                .find(|i| matches!(g.edges[**i].guard, Guard::Fallback))
         {
-            values.insert(e.to.clone(), v.clone());
-            return Ok(());
+            chosen.push(*i);
         }
+    } else {
+        chosen = ids;
     }
-    if let Some(e) = edges.iter().find(|e| matches!(e.guard, Guard::Fallback)) {
-        values.insert(e.to.clone(), v.clone());
+
+    for i in chosen {
+        let edge = &g.edges[i];
+        if edge.ring
+            && let Some(room) = &mut budgets[i]
+        {
+            if *room == 0 {
+                continue;
+            }
+            *room -= 1;
+        }
+        values.insert(edge.to.clone(), v.clone());
+        *stamps.entry(edge.to.clone()).or_insert(0) += 1;
     }
     Ok(())
 }

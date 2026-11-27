@@ -184,7 +184,11 @@ fn apply_arrow(
                 consts,
                 defs,
                 auto,
-                Guard::Always,
+                FirstEdge {
+                    guard: Guard::Always,
+                    ring: false,
+                    budget: None,
+                },
             )?);
         }
         Some(Tok::Branch) => {
@@ -196,29 +200,51 @@ fn apply_arrow(
                 consts,
                 defs,
                 auto,
-                Guard::Always,
+                FirstEdge {
+                    guard: Guard::Always,
+                    ring: false,
+                    budget: None,
+                },
             )?);
         }
         Some(Tok::CondOpen) => {
             let close = toks
                 .iter()
                 .position(|t| *t == Tok::CondClose)
-                .ok_or("condition is not closed with `]->`")?;
-            let guard = if toks[1..close] == [Tok::Star] {
-                Guard::Fallback
-            } else {
-                Guard::When(parse_expr(&toks[1..close], consts)?)
-            };
-            let start = head.clone().ok_or("a conditional edge has no head")?;
-            *current = Some(run_steps(
-                g,
-                &toks[close + 1..],
-                start,
-                consts,
-                defs,
-                auto,
-                guard,
-            )?);
+                .ok_or("a bracket is not closed with `]->`")?;
+            let start = head.clone().ok_or("this edge has no head")?;
+            match parse_bracket(&toks[1..close], consts)? {
+                Bracket::Cond(guard) => {
+                    *current = Some(run_steps(
+                        g,
+                        &toks[close + 1..],
+                        start,
+                        consts,
+                        defs,
+                        auto,
+                        FirstEdge {
+                            guard,
+                            ring: false,
+                            budget: None,
+                        },
+                    )?);
+                }
+                Bracket::Budget(budget) => {
+                    *current = Some(run_steps(
+                        g,
+                        &toks[close + 1..],
+                        start,
+                        consts,
+                        defs,
+                        auto,
+                        FirstEdge {
+                            guard: Guard::Always,
+                            ring: true,
+                            budget,
+                        },
+                    )?);
+                }
+            }
         }
         other => return Err(format!("expected an arrow, got {other:?}")),
     }
@@ -232,6 +258,35 @@ struct Step {
     inlined: bool,
 }
 
+enum Bracket {
+    Cond(Guard),
+    Budget(Option<u32>),
+}
+
+/// The brackets after `-` hold either a condition or a loop budget:
+/// `-[out > 5]->` and `-[*]->` are arms, `-[budget: 1000]->` is a back edge.
+fn parse_bracket(toks: &[Tok], consts: &BTreeMap<String, Value>) -> Result<Bracket, String> {
+    if let [Tok::Ident(key), Tok::Colon, rest @ ..] = toks
+        && key == "budget"
+    {
+        return match rest {
+            [Tok::Int(n)] if *n >= 0 => Ok(Bracket::Budget(Some(*n as u32))),
+            [Tok::Ident(word)] if word == "unbounded" => Ok(Bracket::Budget(None)),
+            _ => Err("`budget` wants a count or `unbounded`".to_string()),
+        };
+    }
+    if toks == [Tok::Star] {
+        return Ok(Bracket::Cond(Guard::Fallback));
+    }
+    Ok(Bracket::Cond(Guard::When(parse_expr(toks, consts)?)))
+}
+
+struct FirstEdge {
+    guard: Guard,
+    ring: bool,
+    budget: Option<u32>,
+}
+
 fn run_steps(
     g: &mut Graph,
     toks: &[Tok],
@@ -239,14 +294,14 @@ fn run_steps(
     consts: &BTreeMap<String, Value>,
     defs: &BTreeMap<String, Def>,
     auto: &mut usize,
-    first_guard: Guard,
+    first: FirstEdge,
 ) -> Result<(String, String), String> {
     if toks.is_empty() {
         return Err("an arrow needs a step after it".to_string());
     }
     let mut src = start;
     let mut rest = toks;
-    let mut first = true;
+    let mut first_step = true;
     loop {
         let (step, used) = parse_step(g, rest, consts, defs, auto, None)?;
         if !step.inlined {
@@ -256,8 +311,8 @@ fn run_steps(
                     step.name
                 )
             })?;
-            let guard = if first {
-                first_guard.clone()
+            let guard = if first_step {
+                first.guard.clone()
             } else {
                 Guard::Always
             };
@@ -265,11 +320,13 @@ fn run_steps(
                 from: src.clone(),
                 to: (step.name.clone(), in_port),
                 guard,
+                ring: first_step && first.ring,
+                budget: if first_step { first.budget } else { None },
             });
         }
         src = (step.name.clone(), step.out_port.clone());
         rest = &rest[used..];
-        first = false;
+        first_step = false;
         if rest.is_empty() {
             break;
         }
@@ -408,6 +465,25 @@ fn parse_step(
                 out_port,
                 in_port: None,
                 inlined: true,
+            },
+            i,
+        ));
+    }
+
+    if ops::signature(&op).is_none()
+        && let Some(node) = g.node(&op)
+    {
+        let out_port = node.out_port.clone();
+        let node_op = node.op.clone();
+        let sig_of =
+            ops::signature(&node_op).ok_or_else(|| format!("`{node_op}` is not an operator"))?;
+        let in_port = spec_in.or_else(|| ops::default_in(sig_of).map(str::to_string));
+        return Ok((
+            Step {
+                name: op,
+                out_port,
+                in_port,
+                inlined: false,
             },
             i,
         ));
@@ -605,6 +681,8 @@ fn inline_def(
             from,
             to,
             guard: e.guard.clone(),
+            ring: e.ring,
+            budget: e.budget,
         });
     }
 
@@ -657,6 +735,8 @@ fn subgraph_from(def: &Def, prefix: &str, op: &str) -> Result<crate::ast::SubGra
             from: (rename[&e.from.0].clone(), e.from.1.clone()),
             to: (rename[&e.to.0].clone(), e.to.1.clone()),
             guard: e.guard.clone(),
+            ring: e.ring,
+            budget: e.budget,
         });
     }
 

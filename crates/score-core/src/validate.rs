@@ -97,7 +97,13 @@ pub fn validate(g: &Graph) -> Result<(), String> {
                 tty.name()
             ));
         }
-        if !seen_in.insert(e.to.clone()) {
+        if !e.ring && reaches(g, &e.to.0, &e.from.0) {
+            return Err(format!(
+                "edge `{}.{}` -> `{}.{}` closes a ring; give it a budget: `-[budget: n]->`",
+                e.from.0, e.from.1, e.to.0, e.to.1
+            ));
+        }
+        if !e.ring && !seen_in.insert(e.to.clone()) {
             return Err(format!("two edges into `{}.{}`", e.to.0, e.to.1));
         }
         if let Guard::When(expr) = &e.guard {
@@ -145,6 +151,25 @@ pub fn validate(g: &Graph) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn reaches(g: &Graph, from: &str, to: &str) -> bool {
+    let mut stack = vec![from];
+    let mut seen: BTreeSet<&str> = BTreeSet::new();
+    while let Some(node) = stack.pop() {
+        if node == to {
+            return true;
+        }
+        if !seen.insert(node) {
+            continue;
+        }
+        for e in &g.edges {
+            if e.from.0 == node {
+                stack.push(e.to.0.as_str());
+            }
+        }
+    }
+    false
 }
 
 fn check_expr(e: &Expr, src: &str, sig: &'static ops::Sig) -> Result<(), String> {

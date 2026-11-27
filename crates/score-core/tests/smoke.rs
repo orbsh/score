@@ -45,6 +45,25 @@ fn newlines_are_layout() {
 }
 
 #[test]
+fn a_ring_turns_within_its_budget() {
+    let g = build(include_str!("../../../examples/ring.score"));
+    let run = exec::run(&g, false).expect("run");
+    assert_eq!(
+        run.values.get(&("acc".to_string(), "out".to_string())),
+        Some(&Value::Int(6))
+    );
+    assert_eq!(run.order.iter().filter(|n| *n == "acc").count(), 6);
+}
+
+#[test]
+fn a_ring_without_a_budget_is_rejected() {
+    let src = "zero = lit(value: 0)\none = lit(value: 1)\nacc = add(b: one)\nzero -> acc<a|>\nacc -> acc<a|>\n";
+    let g = parser::parse(src).expect("parse");
+    let e = validate::validate(&g).expect_err("must be invalid");
+    assert!(e.contains("ring"), "{e}");
+}
+
+#[test]
 fn map_runs_a_def_per_element() {
     let g = build(include_str!("../../../examples/containers.score"));
     let run = exec::run(&g, false).expect("run");

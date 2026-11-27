@@ -21,7 +21,9 @@ Implemented today: the v0 surface (bindings, `<in|out>` ports, `->` / `-->` / `-
 
 `map` and `fold` take a def as their body: the def's graph is cloned once as a template whose param nodes the runtime seeds, and it runs once per element (`fold` threads the accumulator through the same body).
 
-Not implemented yet: rings with seed and budget, records and sums, okm sources (the okm query layer is an idea parked for later). The element type of a list is still not tracked: `List` stands for a list of anything.
+Rings are graph cycles with a budget: `acc -[budget: 5]-> acc<a|>` carries the value back into its own input at most five times, and a plain edge into the same port supplies the first value. The runtime fires a node again only when one of its input stamps moved, so an ordinary program behaves as before while a ring turns until its budget runs out. A cycle without a budget is rejected by validation.
+
+Not implemented yet: records and sums, okm sources (the okm query layer is an idea parked for later). The element type of a list is still not tracked: `List` stands for a list of anything.
 
 Core proposition: the semantics is a graph — steps, control edges, subgraphs — and a run is the append-only log of what fired. A step fires when its inputs resolve; nothing is ordered by its position in the text. Subgraphs are the language's functions: a named graph with a typed signature, instantiated by wiring and inlined before it runs. A step's arguments are literals or references to other steps' ports; the only place an expression appears is an edge predicate. The artifact is the graph's binary form: text is a front end that generates it, rendering is a projection of the same bytes, and a subgraph exported from a graph store is a program without a conversion step.
 

@@ -1,0 +1,7 @@
+# 环：acc 从 0 起，每轮 +1；回边预算是它能回灌的次数
+zero = lit(value: 0)
+one = lit(value: 1)
+acc = add(b: one)
+zero -> acc<a|>
+acc -[budget: 5]-> acc<a|>
+print(value: acc)
