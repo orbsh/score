@@ -40,11 +40,12 @@
 - [90 类型：标量、数组、记录与和](90-types.md)
 - [91 常量与配置：常量节点，覆盖在 run 创建时](91-constants-and-config.md)
 - [92 流与批：入口声明类型，不引入流原语](92-streams-and-batches.md)
-- [93 splice 与 okm：查询语言与内置存储](93-splice-and-okm.md)
+- [93 score 与 okm：查询语言与内置存储](93-score-and-okm.md)
+- [94 价值主张：AI 让写代码变便宜之后，编排层才是缺口](94-value-proposition.md)
 - [85 图的线性化：顺序、跳转与可挂起帧](85-graph-linearization.md)
 - [73 不是通用语言，是协调语言](73-not-general-purpose.md)
 - [74 非对称收益：砍能力面，换每次操作](74-asymmetric-payoff.md)（判断「砍什么」的尺子）
-- [86 定名：splice](86-name-graph-imagery.md)
+- [86 定名：score](86-name-score.md)
 
 候选： [71 KDL 当图的文本前端](71-kdl-surface-syntax.md) · [78 宿主是游戏逻辑扩展](78-game-logic-extension.md) · [72 名字：ψ（旧名）](72-name-psi.md)
 

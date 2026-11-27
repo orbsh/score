@@ -5,9 +5,9 @@
 
 **一句话**：表面取 Scala 的书写形态——花括号定块、`val`/`var`、`def name(args): R = { body }`、`match` 作表达式、`for` 推导、`impl` 兼作扩展方法——保留声明点方差与显式种类的 HKT，砍掉隐式、`infix` 修饰符与四个容器。
 
-**动机**：链是 splice 的第一原语（[11](11-method-chain-primitive.md)），而 Scala 是唯一把链式调用做成日常书写形态、而不是库风格的主流语言。Rust 的皮在链上有一处结构性摩擦，[75](75-rust-surface-syntax.md) 自己记过这笔账：括号把「链跨过实参继续」切断。Scala 的 `xs.map(f).filter(p)` 同样有括号，但它有两样 Rust 没有的东西——尾块实参与扩展方法，链因此可以延伸到自己没定义的类型上。
+**动机**：链是 score 的第一原语（[11](11-method-chain-primitive.md)），而 Scala 是唯一把链式调用做成日常书写形态、而不是库风格的主流语言。Rust 的皮在链上有一处结构性摩擦，[75](75-rust-surface-syntax.md) 自己记过这笔账：括号把「链跨过实参继续」切断。Scala 的 `xs.map(f).filter(p)` 同样有括号，但它有两样 Rust 没有的东西——尾块实参与扩展方法，链因此可以延伸到自己没定义的类型上。
 
-换皮的代价在 [75](75-rust-surface-syntax.md) 里算过一次：照抄 Rust 换来零学习成本。这条要重算：splice 的目标读者不是「从 Rust 来的人」，是写游戏逻辑的人，他们的来路更可能是 Lua、C#、TypeScript，其中 TypeScript 与 Kotlin 的链式写法离 Scala 更近。
+换皮的代价在 [75](75-rust-surface-syntax.md) 里算过一次：照抄 Rust 换来零学习成本。这条要重算：score 的目标读者不是「从 Rust 来的人」，是写游戏逻辑的人，他们的来路更可能是 Lua、C#、TypeScript，其中 TypeScript 与 Kotlin 的链式写法离 Scala 更近。
 
 **形态**：取什么、留什么、舍什么。
 
@@ -34,14 +34,14 @@
 
 舍（Scala 的复杂度来源）：
 
-- 没有 `given`/`using`/隐式转换。splice 没有隐式解析，类型类的实例一律显式传（[33](33-dict-passing.md)）。
+- 没有 `given`/`using`/隐式转换。score 没有隐式解析，类型类的实例一律显式传（[33](33-dict-passing.md)）。
 - 没有种类推断与高阶合一（[36](36-kind-inference.md) 仍关）。
 - 没有 `infix` 修饰符。用「符号名可中缀、字母名必须点」这条现成规则替代。
 - 没有缩进块与 `end` 标记，块边界一律是花括号。
 - 没有 case class 与 extractor 的开放 DSL，`match` 只认既有的几种形态（[68](68-pattern-coverage.md)）。
-- 没有 class 与 companion object 的二分：splice 的 struct 与 object 是同一构造（[22](22-three-containers.md)），enum 是和类型，trait 是标签集。
+- 没有 class 与 companion object 的二分：score 的 struct 与 object 是同一构造（[22](22-three-containers.md)），enum 是和类型，trait 是标签集。
 
-```splice
+```score
 struct Circle {
   radius: Float
   def area(self): Float = { 3.14159 * self.radius * self.radius }

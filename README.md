@@ -1,8 +1,10 @@
-# splice
+# score
 
 A graph-first language: the language is a binary graph, and text is one source that generates it. **Status: design draft — no implementation yet.**
 
 Design: [docs/ideas/](docs/ideas/README.md) — one document per idea; retired ones live under docs/ideas/retired/ (written in Chinese). The pre-split long draft stays at [docs/design.md](docs/design.md) as history.
+
+Positioning: [docs/ideas/94-value-proposition.md](docs/ideas/94-value-proposition.md) — code generation is cheap now, so the cost that decides is the cost of a wrong step; a statically checked, resumable, parallel plan is the layer that bash and Python glue do badly.
 
 Core proposition: the semantics is a graph — steps, control edges, subgraphs — and a run is the append-only log of what fired. A step fires when its inputs resolve; nothing is ordered by its position in the text. Subgraphs are the language's functions: a named graph with a typed signature, instantiated by wiring and inlined before it runs. A step's arguments are literals or references to other steps' ports; the only place an expression appears is an edge predicate. The artifact is the graph's binary form: text is a front end that generates it, rendering is a projection of the same bytes, and a subgraph exported from a graph store is a program without a conversion step.
 
@@ -46,4 +48,4 @@ Read [docs/README.md](docs/README.md) for the layout rule, or jump to [docs/idea
 
 ## Name
 
-splice: a joint that interweaves two ends into one continuous thing — the half-twist that makes a ribbon one-sided, and the operation that inlines a subgraph into its host. The Möbius strip is the image, but its name is a person's; the joint is the half that has a common name. On disk everything is ASCII: `splice`, `script.splice`.
+score: a joint that interweaves two ends into one continuous thing — the half-twist that makes a ribbon one-sided, and the operation that inlines a subgraph into its host. The Möbius strip is the image, but its name is a person's; the joint is the half that has a common name. On disk everything is ASCII: `score`, `script.score`.

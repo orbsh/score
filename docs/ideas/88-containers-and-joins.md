@@ -61,6 +61,6 @@ seed：环的反馈端口在第 0 轮用一次声明的初值。它不是默认�
 - 容器内挂起（内层 request 等人）会让一个实例同时有多种状态，渲染与调试都要按元素显示。
 - **归约只能顺序**：并行归约要求 body 可结合（结合律要声明），v1 不做；一条大 list 的 fold 因此是延迟的主要来源。
 
-**冲突**：[83](83-subgraph-is-a-function.md)（签名与内联）、[85](85-graph-linearization.md)（容器内没有静态顺序）、[82](82-graph-is-the-semantics.md)（叶子的位置）、[84](84-folding-fidelity.md)（容器是可折叠的盒子，内的节点仍不得连外）、[93](93-splice-and-okm.md)（set join 是另一回事：按集合键配对，不是就绪规则）。
+**冲突**：[83](83-subgraph-is-a-function.md)（签名与内联）、[85](85-graph-linearization.md)（容器内没有静态顺序）、[82](82-graph-is-the-semantics.md)（叶子的位置）、[84](84-folding-fidelity.md)（容器是可折叠的盒子，内的节点仍不得连外）、[93](93-score-and-okm.md)（set join 是另一回事：按集合键配对，不是就绪规则）。
 
 **若改掉会动到**：schematic 的 Step 模型（实例化模式、combine 种类）、validate、运行文档编码、渲染与折叠。
