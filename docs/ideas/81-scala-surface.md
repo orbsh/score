@@ -4,9 +4,9 @@
 
 **一句话**：表面取 Scala 的书写形态——花括号定块、`val`/`var`、`def name(args): R = { body }`、`match` 作表达式、`for` 推导、`impl` 兼作扩展方法——保留声明点方差与显式种类的 HKT，砍掉隐式、`infix` 修饰符与四个容器。
 
-**动机**：链是 ψ 的第一原语（[11](11-method-chain-primitive.md)），而 Scala 是唯一把链式调用做成日常书写形态、而不是库风格的主流语言。Rust 的皮在链上有一处结构性摩擦，[75](75-rust-surface-syntax.md) 自己记过这笔账：括号把「链跨过实参继续」切断。Scala 的 `xs.map(f).filter(p)` 同样有括号，但它有两样 Rust 没有的东西——尾块实参与扩展方法，链因此可以延伸到自己没定义的类型上。
+**动机**：链是 splice 的第一原语（[11](11-method-chain-primitive.md)），而 Scala 是唯一把链式调用做成日常书写形态、而不是库风格的主流语言。Rust 的皮在链上有一处结构性摩擦，[75](75-rust-surface-syntax.md) 自己记过这笔账：括号把「链跨过实参继续」切断。Scala 的 `xs.map(f).filter(p)` 同样有括号，但它有两样 Rust 没有的东西——尾块实参与扩展方法，链因此可以延伸到自己没定义的类型上。
 
-换皮的代价在 [75](75-rust-surface-syntax.md) 里算过一次：照抄 Rust 换来零学习成本。这条要重算：ψ 的目标读者不是「从 Rust 来的人」，是写游戏逻辑的人，他们的来路更可能是 Lua、C#、TypeScript，其中 TypeScript 与 Kotlin 的链式写法离 Scala 更近。
+换皮的代价在 [75](75-rust-surface-syntax.md) 里算过一次：照抄 Rust 换来零学习成本。这条要重算：splice 的目标读者不是「从 Rust 来的人」，是写游戏逻辑的人，他们的来路更可能是 Lua、C#、TypeScript，其中 TypeScript 与 Kotlin 的链式写法离 Scala 更近。
 
 **形态**：取什么、留什么、舍什么。
 
@@ -33,14 +33,14 @@
 
 舍（Scala 的复杂度来源）：
 
-- 没有 `given`/`using`/隐式转换。ψ 没有隐式解析，类型类的实例一律显式传（[33](33-dict-passing.md)）。
+- 没有 `given`/`using`/隐式转换。splice 没有隐式解析，类型类的实例一律显式传（[33](33-dict-passing.md)）。
 - 没有种类推断与高阶合一（[36](36-kind-inference.md) 仍关）。
 - 没有 `infix` 修饰符。用「符号名可中缀、字母名必须点」这条现成规则替代。
 - 没有缩进块与 `end` 标记，块边界一律是花括号。
 - 没有 case class 与 extractor 的开放 DSL，`match` 只认既有的几种形态（[68](68-pattern-coverage.md)）。
-- 没有 class 与 companion object 的二分：ψ 的 struct 与 object 是同一构造（[22](22-three-containers.md)），enum 是和类型，trait 是标签集。
+- 没有 class 与 companion object 的二分：splice 的 struct 与 object 是同一构造（[22](22-three-containers.md)），enum 是和类型，trait 是标签集。
 
-```psi
+```splice
 struct Circle {
   radius: Float
   def area(self): Float = { 3.14159 * self.radius * self.radius }
@@ -72,6 +72,6 @@ impl Shape {
 - **扩展方法增加一条名字解析路径**。同一个点可能落到自己的 `impl` 或外来模块的 `impl`，同名时的优先级要为 [21](21-unified-dot-access.md) 的「点只有一种读法」扩一条规则。
 - **隐式砍掉之后没有自动实例**。类型类实例要么手写、要么显式传；这在库作者那侧是负担，在读者那侧是透明。
 
-**冲突**：[75](75-rust-surface-syntax.md) 正面冲突（同一层皮的两个答案）、[12](12-arity-grouping.md)（不分括号的实参分组）、[19](19-block-as-arg.md)（尾块站实参位，本条取花括号）、[13](13-infix-by-spelling.md)（首字符定级，两边一致）、[21](21-unified-dot-access.md)（外来 `impl` 给点访问加了第二个来源）、[35](35-kinds.md) 与 [36](36-kind-inference.md)（HKT 把「种类参数」从派发用扩成真正的构造子参数，但仍拒绝种类推断）、[57](57-linear-compile.md)（一阶匹配是一遍扫描内的匹配，不引入不动点）、[71](71-kdl-surface-syntax.md)（KDL 当表面）。
+**冲突**：[75](75-rust-surface-syntax.md) 正面冲突（同一层皮的两个答案）、[12](12-arity-grouping.md)（不分括号的实参分组）、[19](19-block-as-arg.md)（尾块站实参位，本条取花括号）、[13](13-infix-by-spelling.md)（首字符定级，两边一致）、[21](21-unified-dot-access.md)（外来 `impl` 给点访问加了第二个来源）、[35](35-kinds.md) 与 [36](36-kind-inference.md)（HKT 把「种类参数」从派发用扩成真正的构造子参数，但仍拒绝种类推断）、[57](57-linear-compile.md)（一阶匹配是一遍扫描内的匹配，不引入不动点）、[71](71-kdl-surface-syntax.md)（KDL 当表面）。[82](82-graph-is-the-semantics.md)：整程序的表面改成图的表示，本条降为叶子的表面。
 
 **若改掉会动到**：语法总表的每一个示例、[75](75-rust-surface-syntax.md)、[80](80-position-order.md) 的示例行、[22](22-three-containers.md)、[35](35-kinds.md)、[36](36-kind-inference.md)、[66](66-iteration-protocol.md) 的 `for`、[56e](56e-drop-under-arena.md) 与 [56f](56f-concurrency-region-tree.md) 的代码片段。

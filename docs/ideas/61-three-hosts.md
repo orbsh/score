@@ -9,7 +9,7 @@
 
 - **Rust 扩展**：宿主进程内嵌 wasm runtime，实例化脚本模块，调用导出的 `main` 或命名方法；参数序列化进线性内存，结果按同一格式回写。
 - **浏览器**：`.wasm` + 几十行 JS glue：`WebAssembly.instantiateStreaming` + 导入表（`log`、`fetch`、`now`）。
-- **CLI**：`psi run script.psi`，Rust 二进制 + runtime，编译与实例化在同一次进程内；stdin/stdout 是 `Text` 或 `Bytes`，参数是 `List<Text>`；没有 shell 语义（没有内建 `cd`/`ls`/环境变量，这些走宿主导入）。
+- **CLI**：`splice run script.splice`，Rust 二进制 + runtime，编译与实例化在同一次进程内；stdin/stdout 是 `Text` 或 `Bytes`，参数是 `List<Text>`；没有 shell 语义（没有内建 `cd`/`ls`/环境变量，这些走宿主导入）。
 
 **代价**：
 

@@ -24,6 +24,6 @@ trait Fn<A, B> {
 
 **代价**：没有 `∘` 这样的运算符，点式组合（`f.then g.then h`）比 `f ∘ g ∘ h` 长；合取没有排序语义，想表达「先 Read 后 Write 的流水」必须用链或 `Fn`，不能借 trait 组合。
 
-**冲突**：[17](17-currying.md) 相关（偏应用会让 `Fn` 与多参函数的关系变复杂）；[16](16-methods-are-not-values.md) 决定 `Fn` 只能由块实现。
+**冲突**：[17](17-currying.md) 相关（偏应用会让 `Fn` 与多参函数的关系变复杂）；[16](16-methods-are-not-values.md) 决定 `Fn` 只能由块实现。[82](82-graph-is-the-semantics.md)：组合多出第四种载体——图，且它不与这三种互相替代。
 
 **若改掉会动到**：prelude 的 `Fn` 族、[35](35-kinds.md)（容器派生方法依赖 `Fn`）、中缀运算符清单（若要加 `∘`）。

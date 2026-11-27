@@ -38,6 +38,6 @@ chain     = primary ( '.' name ( '(' args? ')' )? | '(' args? ')' | '?' )*
 
 **代价**：arity 仍在声明里（调用必须给满，多给少给都是编译错误），但分组不再依赖它，所以屏幕上读片段这件事不再需要外部信息——这是照 [75](75-rust-surface-syntax.md) 换表面换回来的。剩下的代价有两处：「零参不写括号」要教一遍（Rust 读者会以为 `c.area` 是字段）；`x.f` 与 `x.g(a)` 混排时，读者要靠「有没有实参」判断每一段是取属性还是调用。另外[12](12-arity-grouping.md) 那种「链跨过实参继续」的写法没了，实参括起来之后链只在括号外延续。
 
-**冲突**：[12](12-arity-grouping.md) 说的是这个原语的记法（不带括号）；换记法（括号 + 逗号）会保留 `arity` 概念但改变分组规则。[13](13-infix-by-spelling.md) 是它的中缀记法。[14](14-no-pipe.md) 说管道就是这个原语，[15](15-pipe-operator.md) 说要另设符号。若 [16](16-methods-are-not-values.md) 反过来（方法成为值），这条原语要再加一套「名字在表达式里表示什么」的规则。
+**冲突**：[12](12-arity-grouping.md) 说的是这个原语的记法（不带括号）；换记法（括号 + 逗号）会保留 `arity` 概念但改变分组规则。[13](13-infix-by-spelling.md) 是它的中缀记法。[14](14-no-pipe.md) 说管道就是这个原语，[15](15-pipe-operator.md) 说要另设符号。若 [16](16-methods-are-not-values.md) 反过来（方法成为值），这条原语要再加一套「名字在表达式里表示什么」的规则。[82](82-graph-is-the-semantics.md)：语言的原语换成步骤触发，本条降为叶子语言的调用原语。
 
 **若改掉会动到**：[12](12-arity-grouping.md)、[13](13-infix-by-spelling.md)、[19](19-block-as-arg.md)、[21](21-unified-dot-access.md)、语法总表。

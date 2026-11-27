@@ -1,55 +1,48 @@
-# ψ (psi)
+# splice
 
-A method-chain language native to wasm. **Status: design draft — no implementation yet.**
+A graph-first language: the language is a binary graph, and text is one source that generates it. **Status: design draft — no implementation yet.**
 
-Design: [docs/ideas/](docs/ideas/README.md) — one document per idea, no verdicts (written in
-Chinese). Syntax shapes live in [docs/reference/syntax.md](docs/reference/syntax.md). The
-pre-split long draft stays at [docs/design.md](docs/design.md) as history.
+Design: [docs/ideas/](docs/ideas/README.md) — one document per idea, no verdicts (written in Chinese). The pre-split long draft stays at [docs/design.md](docs/design.md) as history.
 
-Core proposition: the whole language compresses to two rules — a call is *receiver + name +
-the arguments the declaration states*, and a type is *data shape + a set of trait labels* with
-no inheritance chain. Pipes, infix operators and modules are notations of those two rules, not
-separate mechanisms. Methods are never values and functions only exist as closures, so there is
-no currying.
+Core proposition: the semantics is a graph — steps, control edges, subgraphs — and a run is the append-only log of what fired. A step fires when its inputs resolve; nothing is ordered by its position in the text. Subgraphs are the language's functions: a named graph with a typed signature, instantiated by wiring and inlined before it runs. A step's arguments and results are computed in a leaf expression language. The artifact is the graph's binary form: text is a front end that generates it, rendering is a projection of the same bytes, and a subgraph exported from a graph store is a program without a conversion step.
 
-Surface: Rust syntax (`fn`, `let mut`, parentheses and commas, `match`, `|x|`, `#[attr]`, `::`
-paths, `;` and expression blocks) over value semantics — no `&`, no `*`, no lifetimes, no borrow
-checker. Where Rust's surface fights fluency, fluency wins: the ordering of criteria is
-fluency > least surprise > mechanism count > token count, and *terseness is not a criterion*.
+The Lisp correspondence, stated precisely: Lisp gives a program a list representation, and the list is not the semantics — the AST is. Here the binary graph is both the semantics and the interchange format, which Lisp does not have (its AST lives in memory). The gain is not macros but structure: the same program can be rendered, folded level by level, resumed from its document, audited edge by edge, and stored as the graph it is.
 
-One artifact, three hosts:
+Layers:
 
-- **Rust engine extension** — the host embeds a wasm runtime and instantiates the compiled
-  `.wasm` module; editing a script means recompiling and reinstantiating.
-- **Browser** — the same `.wasm`; JavaScript only supplies the imports.
-- **CLI** — `psi run script.psi`; the CLI is itself a wasm host.
+```
+layer   what it is                                                        rules live in
+graph   steps, kinds, control edges, budgets, subgraph signatures          the binary plan format; schematic implements the fold today
+text    front ends that generate that binary (KDL, JSON, an editor)        this project (docs/ideas)
+leaf    expressions that compute a step's values: chains, types            this project; whole program lowers to bytecode or wasm
+```
 
-Hard constraints that follow from that:
+Constraints that follow from the graph being the source of truth:
 
-- The artifact is a standard wasm module (Wasm 3.0 GC types plus a few WASI imports) — not a
-  private bytecode, not a bundled runtime.
-- Compilation is whole-program and linear, no fixed point: script save lands in the edit loop.
-- The spec stays small enough for one person to read: no borrow checker, allocator, GC
-  implementation, linker, or package version solving.
-- The boundary with the host is bytes only: numeric values, linear memory, `externref`;
-  everything else is serialized.
+- A subgraph's inside never connects to its outside except through its typed ports — otherwise collapsing it would hide edges and the drawing would lie (`84`).
+- There is no call stack: instantiation is inlined at validate time with depth and instance caps, so expansion is a bounded worklist, not a fixed point (`83`, `57`).
+- A `request` step may wait for days, so any lower artifact needs a resumable frame or the run document as its continuation (`85`).
+- The model is schematic's, extended in schematic — never a second parallel model — so a later engine replacement swaps `validate`/`ready`/`advance`, not the format (`87`).
+
+## The leaf layer
+
+The expression language is the one the earlier drafts described, now scoped to what a node computes: a call is *receiver + name + the arguments the declaration states*, and a type is *data shape + a set of trait labels* with no inheritance chain. Pipes, infix operators and modules are notations of those two rules, not separate mechanisms. Methods are never values and functions only exist as closures, so there is no currying. Surface: Rust syntax over value semantics — no `&`, no `*`, no lifetimes, no borrow checker; where Rust's surface fights fluency, fluency wins.
+
+The leaf's carrier today is a standard wasm module (Wasm 3.0 GC types plus a few WASI imports) run by a Rust engine extension, a browser, or the CLI; a self-built bytecode VM is a candidate (`77`). Compilation is whole-program and linear with no fixed point, and the boundary with the host is bytes only. The graph layer itself lowers to bytecode or another target (`85`); wasm is one instance, not the definition.
 
 ## Layout
 
 ```
 docs/
 ├── ideas/          一个想法一份文档（允许冲突，没有终态）
-├── reference/      语法总表与示例程序
+├── reference/      语法总表与示例程序（叶子语言）
 └── design.md       拆分前的长文，保留备查
 
 README.md
 ```
 
-Read [docs/README.md](docs/README.md) for the layout rule, or jump to
-[docs/ideas/README.md](docs/ideas/README.md) for the idea index.
+Read [docs/README.md](docs/README.md) for the layout rule, or jump to [docs/ideas/README.md](docs/ideas/README.md) for the idea index.
 
 ## Name
 
-ψ (psi): ψυχή (breath, soul) and the quantum-mechanical amplitude — light, without body,
-but genuinely a thing in a field, matching the physics naming of the `~/world` family
-(aura, effector, gravity). On disk everything is ASCII: `psi`, `script.psi`.
+splice: a joint that interweaves two ends into one continuous thing — the half-twist that makes a ribbon one-sided, and the operation that inlines a subgraph into its host. The Möbius strip is the image, but its name is a person's; the joint is the half that has a common name. On disk everything is ASCII: `splice`, `script.splice`.

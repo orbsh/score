@@ -27,6 +27,15 @@
 
 ## 目录
 
+### 图与语义
+
+- [82 图是语义，文本是它的表示](82-graph-is-the-semantics.md)
+- [83 子图即函数：签名、内联、没有调用栈](83-subgraph-is-a-function.md)
+- [84 折叠忠实：子图内部不得连到外部](84-folding-fidelity.md)
+- [85 图的线性化：顺序、跳转与可挂起帧](85-graph-linearization.md)
+- [86 定名：splice](86-name-graph-imagery.md)
+- [87 二进制图是本体](87-binary-graph-is-the-artifact.md)
+
 ### 调用与表达式
 
 - [11 调用只有一个原语](11-method-chain-primitive.md)
@@ -97,7 +106,7 @@
 ### 立场
 
 - [71 KDL 当表面语法](71-kdl-surface-syntax.md)
-- [72 名字：ψ](72-name-psi.md)
+- [72 名字：ψ（旧名，已由 86 取代）](72-name-psi.md)
 - [73 不是通用语言](73-not-general-purpose.md)
 - [74 非对称收益：砍能力面，换每次操作](74-asymmetric-payoff.md)
 - [78 宿主是游戏逻辑扩展：事件、条件、动作](78-game-logic-extension.md)

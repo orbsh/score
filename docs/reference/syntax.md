@@ -7,7 +7,7 @@
 ```
 // 注释到行尾；/// 是文档注释
 
-val name: Text = "psi"           // 不可变绑定
+val name: Text = "splice"        // 不可变绑定
 var count: Int = 0               // 可重绑槽
 count = count + 1                // 赋值语句，只能赋 var 槽
 
@@ -70,7 +70,7 @@ type IntEither<A> = Either<Int, A>   // 部分应用写成具名别名，不写�
 @deprecated("用 Csv 代替")
 def parse(line: Text): Row = { ... }
 
-val Shapes = import("./shapes.psi")   // 导入：得到被导入文件的模块对象
+val Shapes = import("./shapes.splice")   // 导入：得到被导入文件的模块对象
 ```
 
 ## 宏
@@ -94,7 +94,7 @@ def list(): Json = { ... }
 ```
 42   3.14   true   "text"                 // 字面量
 -1                                        // 负字面量：- 紧贴数字且在 primary 位
-"psi {version} is {n} bytes"              // Text 插值：捕获作用域内的名字与表达式
+"splice {version} is {n} bytes"           // Text 插值：捕获作用域内的名字与表达式
 [1, 2, 3]                                 // 数组字面量：定长只读
 Circle { radius: 2.0 }                    // struct 字面量，类型必写
 |x| x * 2                                 // 一参闭包

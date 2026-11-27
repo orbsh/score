@@ -1,14 +1,14 @@
 # 模块是值，import 是绑定
 
 **状态**：在用（可改）
-**一句话**：`let Shapes = import "./shapes.psi"`；import 返回被导入文件的模块对象，类型位置上的 `Shapes.Circle` 是这个对象上的类型投影。命名空间不是树，是对象链。
+**一句话**：`let Shapes = import "./shapes.splice"`；import 返回被导入文件的模块对象，类型位置上的 `Shapes.Circle` 是这个对象上的类型投影。命名空间不是树，是对象链。
 
 **动机**：只有一种「名字从哪来」的机制。文件路径仍然是树，但那只是寻址工具；名字解析不依赖树，也就不需要第二套复用拓扑。名字是第一类值，可以传递、可以参数化。
 
 **形态**：
 
 ```
-let Shapes = import "./shapes.psi"
+let Shapes = import "./shapes.splice"
 
 def render c: Shapes.Circle -> Text = ...
 ```
