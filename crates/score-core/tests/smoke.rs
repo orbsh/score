@@ -45,6 +45,48 @@ fn newlines_are_layout() {
 }
 
 #[test]
+fn lists_flow_through_operators() {
+    let g = build(include_str!("../../../examples/list.score"));
+    let run = exec::run(&g, false).expect("run");
+    let xs = run.values.get(&("xs".to_string(), "out".to_string()));
+    assert_eq!(
+        xs,
+        Some(&Value::List(vec![
+            Value::Int(0),
+            Value::Int(1),
+            Value::Int(2),
+            Value::Int(3),
+            Value::Int(4)
+        ]))
+    );
+    assert_eq!(
+        run.values.get(&("total".to_string(), "out".to_string())),
+        Some(&Value::Int(10))
+    );
+    assert_eq!(
+        run.values.get(&("text".to_string(), "out".to_string())),
+        Some(&Value::Text("0-1-2-3-4".to_string()))
+    );
+}
+
+#[test]
+fn a_list_survives_the_journal() {
+    let g = build(include_str!("../../../examples/list.score"));
+    let run = exec::run(&g, false).expect("run");
+    let text = score_core::journal::write(g.fingerprint(), &run.entries);
+    let back = score_core::journal::read(&text).expect("read");
+    let xs = back
+        .entries
+        .iter()
+        .find(|e| e.node == "xs")
+        .map(|e| e.value.clone());
+    assert_eq!(
+        xs,
+        Some(Value::List((0..5).map(Value::Int).collect::<Vec<_>>()))
+    );
+}
+
+#[test]
 fn journal_round_trips() {
     let g = build(include_str!("../../../examples/sum.score"));
     let run = exec::run(&g, false).expect("run");

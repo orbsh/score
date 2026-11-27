@@ -8,6 +8,7 @@ pub enum Value {
     Text(String),
     Bool(bool),
     Unit,
+    List(Vec<Value>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,6 +17,7 @@ pub enum Ty {
     Text,
     Bool,
     Unit,
+    List,
     Any,
 }
 
@@ -26,6 +28,7 @@ impl Ty {
             Ty::Text => "Text",
             Ty::Bool => "Bool",
             Ty::Unit => "Unit",
+            Ty::List => "List",
             Ty::Any => "Any",
         }
     }
@@ -37,6 +40,7 @@ pub fn type_of(v: &Value) -> Ty {
         Value::Text(_) => Ty::Text,
         Value::Bool(_) => Ty::Bool,
         Value::Unit => Ty::Unit,
+        Value::List(_) => Ty::List,
     }
 }
 
@@ -52,6 +56,17 @@ impl Value {
             Value::Bool(b) => b.to_string(),
             Value::Text(s) => json_string(s),
             Value::Unit => "null".to_string(),
+            Value::List(items) => {
+                let mut out = String::from("[");
+                for (i, v) in items.iter().enumerate() {
+                    if i > 0 {
+                        out.push(',');
+                    }
+                    out.push_str(&v.to_json());
+                }
+                out.push(']');
+                out
+            }
         }
     }
 }
@@ -81,6 +96,16 @@ impl fmt::Display for Value {
             Value::Text(s) => write!(f, "{s}"),
             Value::Bool(b) => write!(f, "{b}"),
             Value::Unit => write!(f, "unit"),
+            Value::List(items) => {
+                write!(f, "[")?;
+                for (i, v) in items.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{v}")?;
+                }
+                write!(f, "]")
+            }
         }
     }
 }

@@ -66,6 +66,9 @@ pub fn read(src: &str) -> Result<Journal, String> {
             Some(Json::Bool(b)) => Value::Bool(*b),
             Some(Json::Str(s)) => Value::Text(s.clone()),
             Some(Json::Null) => Value::Unit,
+            Some(Json::Arr(items)) => {
+                to_list(items).ok_or_else(|| format!("line {}: bad list value", n + 1))?
+            }
             None => return Err(format!("line {}: missing `value`", n + 1)),
         };
         entries.push(Entry {
@@ -86,12 +89,27 @@ fn text(obj: &BTreeMap<String, Json>, key: &str, line: usize) -> Result<String, 
     }
 }
 
+fn to_list(items: &[Json]) -> Option<Value> {
+    let mut out = Vec::with_capacity(items.len());
+    for item in items {
+        out.push(match item {
+            Json::Int(i) => Value::Int(*i),
+            Json::Bool(b) => Value::Bool(*b),
+            Json::Str(s) => Value::Text(s.clone()),
+            Json::Null => Value::Unit,
+            Json::Arr(nested) => to_list(nested)?,
+        });
+    }
+    Some(Value::List(out))
+}
+
 #[derive(Debug)]
 enum Json {
     Int(i64),
     Bool(bool),
     Null,
     Str(String),
+    Arr(Vec<Json>),
 }
 
 struct Parser<'a> {
@@ -137,7 +155,8 @@ impl Parser<'_> {
         self.ws();
         match self.peek() {
             Some(b'"') => Ok(Json::Str(self.string()?)),
-            Some(b'{') | Some(b'[') => Err("the journal holds scalars only".to_string()),
+            Some(b'[') => self.array(),
+            Some(b'{') => Err("a journal value cannot hold an object".to_string()),
             Some(b't') => {
                 self.word(b"true")?;
                 Ok(Json::Bool(true))
@@ -152,6 +171,28 @@ impl Parser<'_> {
             }
             Some(_) => self.int(),
             None => Err("unexpected end of line".to_string()),
+        }
+    }
+
+    fn array(&mut self) -> Result<Json, String> {
+        self.expect(b'[')?;
+        let mut items = Vec::new();
+        self.ws();
+        if self.peek() == Some(b']') {
+            self.i += 1;
+            return Ok(Json::Arr(items));
+        }
+        loop {
+            items.push(self.value()?);
+            self.ws();
+            match self.peek() {
+                Some(b',') => self.i += 1,
+                Some(b']') => {
+                    self.i += 1;
+                    return Ok(Json::Arr(items));
+                }
+                _ => return Err("expected `,` or `]`".to_string()),
+            }
         }
     }
 

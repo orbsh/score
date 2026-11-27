@@ -1,0 +1,8 @@
+# list 是一个值：range 造，count / sum / join 消费
+xs = range(n: 5)
+n = count(xs: xs)
+total = sum(xs: xs)
+text = join(xs: xs, sep: "-")
+print(value: n)
+print(value: total)
+print(value: text)

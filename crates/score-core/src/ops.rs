@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::value::{Ty, Value};
+use crate::value::{Ty, Value, type_of};
 
 pub struct Sig {
     pub ins: &'static [(&'static str, Ty)],
@@ -33,6 +33,26 @@ static PRINT: Sig = Sig {
     ins: &[("value", Ty::Any)],
     outs: &[("out", Ty::Unit)],
 };
+static RANGE: Sig = Sig {
+    ins: &[("n", Ty::Int)],
+    outs: &[("out", Ty::List)],
+};
+static COUNT: Sig = Sig {
+    ins: &[("xs", Ty::List)],
+    outs: &[("out", Ty::Int)],
+};
+static SUM: Sig = Sig {
+    ins: &[("xs", Ty::List)],
+    outs: &[("out", Ty::Int)],
+};
+static JOIN: Sig = Sig {
+    ins: &[("xs", Ty::List), ("sep", Ty::Text)],
+    outs: &[("out", Ty::Text)],
+};
+static AT: Sig = Sig {
+    ins: &[("xs", Ty::List), ("index", Ty::Int)],
+    outs: &[("out", Ty::Any)],
+};
 
 pub fn signature(op: &str) -> Option<&'static Sig> {
     match op {
@@ -42,6 +62,11 @@ pub fn signature(op: &str) -> Option<&'static Sig> {
         "upper" => Some(&UPPER),
         "len" => Some(&LEN),
         "print" => Some(&PRINT),
+        "range" => Some(&RANGE),
+        "count" => Some(&COUNT),
+        "sum" => Some(&SUM),
+        "join" => Some(&JOIN),
+        "at" => Some(&AT),
         _ => None,
     }
 }
@@ -100,6 +125,47 @@ pub fn apply(op: &str, args: &BTreeMap<&str, Value>) -> Result<Value, String> {
             println!("print: {v}");
             Ok(Value::Unit)
         }
+        "range" => {
+            let n = as_int(op, "n", &get("n")?)?;
+            if n < 0 {
+                return Err("`range` wants a count that is not negative".to_string());
+            }
+            Ok(Value::List((0..n).map(Value::Int).collect()))
+        }
+        "count" => {
+            let xs = get("xs")?;
+            Ok(Value::Int(as_list(op, "xs", &xs)?.len() as i64))
+        }
+        "sum" => {
+            let xs = get("xs")?;
+            let mut total = 0i64;
+            for v in as_list(op, "xs", &xs)? {
+                total += as_int(op, "xs element", v)?;
+            }
+            Ok(Value::Int(total))
+        }
+        "join" => {
+            let xs = get("xs")?;
+            let sep = get("sep")?;
+            let sep = as_text(op, "sep", &sep)?;
+            let parts: Vec<String> = as_list(op, "xs", &xs)?
+                .iter()
+                .map(|v| v.to_string())
+                .collect();
+            Ok(Value::Text(parts.join(sep)))
+        }
+        "at" => {
+            let xs = get("xs")?;
+            let index = as_int(op, "index", &get("index")?)?;
+            let items = as_list(op, "xs", &xs)?;
+            if index < 0 || index as usize >= items.len() {
+                return Err(format!(
+                    "`at` index {index} is outside a list of {}",
+                    items.len()
+                ));
+            }
+            Ok(items[index as usize].clone())
+        }
         other => Err(format!("unknown operator `{other}`")),
     }
 }
@@ -115,5 +181,15 @@ fn as_text<'a>(op: &str, port: &str, v: &'a Value) -> Result<&'a str, String> {
     match v {
         Value::Text(s) => Ok(s),
         other => Err(format!("`{op}.{port}` wants Text, got {other:?}")),
+    }
+}
+
+fn as_list<'a>(op: &str, port: &str, v: &'a Value) -> Result<&'a Vec<Value>, String> {
+    match v {
+        Value::List(items) => Ok(items),
+        other => Err(format!(
+            "`{op}.{port}` wants List, got {}",
+            type_of(other).name()
+        )),
     }
 }
