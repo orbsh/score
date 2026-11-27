@@ -1,0 +1,15 @@
+[package]
+name = "score-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "score"
+path = "src/main.rs"
+
+[dependencies]
+score-core = { path = "../score-core" }

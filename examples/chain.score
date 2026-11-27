@@ -1,0 +1,5 @@
+# 一条链：5 进 add 的 a 端口，出口 out 继续，最后打印
+src = lit(value: 5)
+src
+  -> add<a|out>(b: 10)
+  -> print

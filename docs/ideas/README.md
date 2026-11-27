@@ -42,6 +42,9 @@
 - [92 流与批：入口声明类型，不引入流原语](92-streams-and-batches.md)
 - [93 score 与 okm：查询语言与内置存储](93-score-and-okm.md)
 - [94 价值主张：AI 让写代码变便宜之后，编排层才是缺口](94-value-proposition.md)
+- [95 性能与耐久：导线很便宜，日志才是地板](95-performance-and-durability.md)
+- [96 语法 v0：连线为主体](96-syntax-v0.md)
+- [97 嵌入式规则：与 Lua 比](97-embedded-rules-vs-lua.md)
 - [85 图的线性化：顺序、跳转与可挂起帧](85-graph-linearization.md)
 - [73 不是通用语言，是协调语言](73-not-general-purpose.md)
 - [74 非对称收益：砍能力面，换每次操作](74-asymmetric-payoff.md)（判断「砍什么」的尺子）

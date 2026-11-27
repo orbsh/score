@@ -1,0 +1,14 @@
+[workspace]
+resolver = "2"
+members = ["crates/score-core", "crates/score-cli"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.90"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = "warn"

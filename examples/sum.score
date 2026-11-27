@@ -1,0 +1,5 @@
+# 2 + 3，打印结果
+a = lit(value: 2)
+b = lit(value: 3)
+total = add(a: a, b: b)
+print(value: total)

@@ -1,0 +1,4 @@
+# 条件分支：两支互斥，只有一支发火
+n = lit(value: 5)
+n -[out >= 5]-> print
+n -[*]-> print

@@ -49,7 +49,7 @@ score 占的就是这一格：粗粒度、图即文档、可暂停、可审计�
 
 对比：Temporal 每个 activity 是一次服务往返加持久化（ms 级）；Argo 每步是一个 pod（秒级）；bash 每步一次进程启动（ms 级）。
 
-结论：score 的卖点不是「比 Rust 快」，是「每步便宜、等待免费、日志是唯一地板」；批提交把地板压低，而且和 okm 的 batch 提交是同一条路（[93](93-score-and-okm.md)：效果与日志同批）。
+结论：score 的卖点不是「比 Rust 快」，是「每步便宜、等待免费、日志是唯一地板」；批提交把地板压低，而且和 okm 的 batch 提交是同一条路（[93](93-score-and-okm.md)：效果与日志同批）。无日志、纯进程内的分层、与 Python 的逐场景对比，以及 LSM 对地板的实际影响，见 [95](95-performance-and-durability.md)。
 
 **代价**：
 
