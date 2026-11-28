@@ -198,6 +198,20 @@ fn table() -> &'static BTreeMap<&'static str, Sig> {
                     outs: vec![("out", Ty::Bool)],
                 },
             ),
+            (
+                "to_text",
+                Sig {
+                    ins: vec![("v", Ty::Any)],
+                    outs: vec![("out", Ty::Text)],
+                },
+            ),
+            (
+                "to_int",
+                Sig {
+                    ins: vec![("text", Ty::Text)],
+                    outs: vec![("out", Ty::Int)],
+                },
+            ),
         ];
         entries.into_iter().collect()
     })
@@ -347,6 +361,15 @@ pub fn apply(op: &str, args: &BTreeMap<&str, Value>) -> Result<Value, String> {
             "`{op}` runs a def per element and is driven by the runtime, not by `apply`"
         )),
         "param" => Err("a parameter is seeded by the runtime, it never fires".to_string()),
+        "to_text" => Ok(Value::Text(get("v")?.to_string())),
+        "to_int" => {
+            let t = get("text")?;
+            let s = as_text(op, "text", &t)?;
+            s.trim()
+                .parse::<i64>()
+                .map(Value::Int)
+                .map_err(|_| format!("`to_int` cannot read `{s}` as an integer"))
+        }
         "put" => {
             let r = get("r")?;
             let kv = get("key")?;

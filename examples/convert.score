@@ -1,0 +1,6 @@
+# 文本与整数互为进出：to_text 用值和 print 一样的写法，to_int 读不出就报错
+n = lit(value: 42)
+s = to_text(v: n)
+m = to_int(text: s)
+s -> print
+m -> print

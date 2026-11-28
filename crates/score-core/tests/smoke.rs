@@ -47,6 +47,27 @@ fn newlines_are_layout() {
 }
 
 #[test]
+fn a_value_goes_to_text_and_back() {
+    let g = build(include_str!("../../../examples/convert.score"));
+    let run = exec::run(&g, false).expect("run");
+    assert_eq!(
+        run.values.get(&("s".to_string(), "out".to_string())),
+        Some(&Value::Text("42".to_string()))
+    );
+    assert_eq!(
+        run.values.get(&("m".to_string(), "out".to_string())),
+        Some(&Value::Int(42))
+    );
+}
+
+#[test]
+fn to_int_refuses_what_it_cannot_read() {
+    let g = build("t = lit(value: \"4x\")\nn = to_int(text: t)\n");
+    let e = exec::run(&g, false).expect_err("run");
+    assert!(e.contains("cannot read `4x`"), "{e}");
+}
+
+#[test]
 fn a_record_is_a_dictionary() {
     let g = build(include_str!("../../../examples/dict.score"));
     let run = exec::run(&g, false).expect("run");
