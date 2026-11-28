@@ -66,10 +66,14 @@ pub fn graph_text(g: &Graph) -> String {
     for n in &g.nodes {
         let _ = writeln!(
             out,
-            "  {}  {}  .{}{}{}",
+            "  {}  {}  .{}{}{}{}",
             n.name,
             n.op,
             n.out_port,
+            match g.node_tys.get(&n.name) {
+                Some(t) => format!(": {}", t.name()),
+                None => String::new(),
+            },
             args(n),
             attrs(g.node_attrs.get(&n.name))
         );

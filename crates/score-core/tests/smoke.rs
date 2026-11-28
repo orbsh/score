@@ -47,6 +47,27 @@ fn newlines_are_layout() {
 }
 
 #[test]
+fn match_arms_must_agree_on_a_type() {
+    let src = "enum Shape {\n  Circle { r: Int }\n  Rect { w: Int, h: Int }\n}\ndef a(r: Int) -> (out: Text) {\n  out = lit(value: \"x\")\n}\ndef b(w: Int, h: Int) -> (out: Int) {\n  out = lit(value: 1)\n}\ns = Circle(r: 1)\nm = match(on: s, Circle: a, Rect: b)\n";
+    let e = parser::parse(src).expect_err("parse");
+    assert!(e.contains("arms must agree"), "{e}");
+}
+
+#[test]
+fn a_match_carries_its_arms_type() {
+    let g = build(include_str!("../../../examples/match.score"));
+    assert_eq!(
+        g.node_tys.get("m"),
+        Some(&Ty::Text),
+        "both arms produce Text"
+    );
+    assert!(
+        score_core::render::graph_text(&g).contains(".out: Text"),
+        "the type shows in the rendering"
+    );
+}
+
+#[test]
 fn a_variant_reports_its_tag_and_fields() {
     let src = "enum Shape {\n  Circle { r: Int }\n  Rect { w: Int, h: Int }\n}\ns = Circle(r: 7)\nt = tag(v: s)\nr = get(r: s, key: \"r\")\nt -> print\nr -> print\n";
     let g = build(src);

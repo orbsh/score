@@ -725,6 +725,7 @@ fn parse_step(
             None => return Err("`match` needs `on:`".to_string()),
         };
         let mut arms: BTreeMap<String, Arg> = BTreeMap::new();
+        let mut arm_ty: Option<(String, Ty)> = None;
         for (k, a) in &args {
             if k == "on" {
                 continue;
@@ -737,8 +738,26 @@ fn parse_step(
                 .defs
                 .get(&target)
                 .ok_or_else(|| format!("`match.{k}`: `{target}` is not a def"))?;
+            // The arms have to agree: a sum whose arms produce different types
+            // would make the node's output depend on the tag at run time, which
+            // the type algebra cannot express.
+            let ty = def.outs[0].1.clone();
+            match &arm_ty {
+                None => arm_ty = Some((k.clone(), ty)),
+                Some((first, t)) if *t != ty => {
+                    return Err(format!(
+                        "`match` arms must agree on a type: `{first}` gives {}, `{k}` gives {}",
+                        t.name(),
+                        ty.name()
+                    ));
+                }
+                _ => {}
+            }
             let sub = subgraph_from(def, &format!("{name}.{k}"), &op)?;
             arms.insert(k.clone(), Arg::Sub(Box::new(sub)));
+        }
+        if let Some((_, ty)) = arm_ty {
+            g.node_tys.insert(name.clone(), ty);
         }
         arms.insert("on".to_string(), on);
         g.nodes.push(Node {
@@ -899,6 +918,13 @@ fn inline_def(
             format!("{bind}/{}", n.name)
         };
         rename.insert(n.name.clone(), new_name);
+    }
+    // A body may hold nodes whose type is recorded rather than declared — a
+    // `match`, for one — and the rename has to reach those entries too.
+    for (name, ty) in &def.body.node_tys {
+        if let Some(new_name) = rename.get(name) {
+            g.node_tys.insert(new_name.clone(), ty.clone());
+        }
     }
 
     // Param sources: a literal becomes a lit node, a reference or the chained
@@ -1091,8 +1117,12 @@ fn subgraph_from(def: &Def, prefix: &str, op: &str) -> Result<crate::ast::SubGra
         };
         rename.insert(n.name.clone(), renamed);
     }
-
     let mut g = Graph::default();
+    for (name, ty) in &def.body.node_tys {
+        if let Some(new_name) = rename.get(name) {
+            g.node_tys.insert(new_name.clone(), ty.clone());
+        }
+    }
     for n in &def.body.nodes {
         let mut args = BTreeMap::new();
         for (port, arg) in &n.args {

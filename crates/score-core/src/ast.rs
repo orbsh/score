@@ -106,6 +106,9 @@ pub struct Graph {
     /// Declared signatures, kept so a graph can be rendered back. A def's body
     /// lives inlined at its call sites; this is only what it promises.
     pub sigs: BTreeMap<String, Signature>,
+    /// Output types for nodes that have no static operator signature — `match`
+    /// today: its arms agree on a type, so the node carries that type.
+    pub node_tys: BTreeMap<String, Ty>,
 }
 
 impl Graph {

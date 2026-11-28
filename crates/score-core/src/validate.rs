@@ -106,8 +106,10 @@ pub fn validate(g: &Graph) -> Result<(), String> {
             .get(e.to.0.as_str())
             .ok_or_else(|| format!("edge to unknown node `{}`", e.to.0))?;
         let tsig = ops::signature(&tn.op);
-        let sty = if sn.op == "param" || sn.op == "match" {
+        let sty = if sn.op == "param" {
             &Ty::Any
+        } else if sn.op == "match" {
+            g.node_tys.get(&sn.name).unwrap_or(&Ty::Any)
         } else if g.ctors.contains_key(&sn.op) {
             if e.from.1 != sn.op {
                 return Err(format!(
