@@ -4,7 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::ast::{Arg, Expr, Graph, Guard, Node};
 use crate::ops;
-use crate::value::{Ty, accepts, type_of};
+use crate::types::known_ty;
+use crate::value::{Ty, Value, accepts, type_of};
 
 pub fn validate(g: &Graph) -> Result<(), String> {
     let mut by_name: BTreeMap<&str, &Node> = BTreeMap::new();
@@ -44,6 +45,9 @@ pub fn validate(g: &Graph) -> Result<(), String> {
         if !sig.outs.iter().any(|(p, _)| *p == n.out_port) && n.op != "param" {
             return Err(format!("`{}` has no output port `{}`", n.op, n.out_port));
         }
+        if n.op == "get" {
+            check_field(g, &by_name, n)?;
+        }
         for (port, arg) in &n.args {
             if ops::is_variadic(&n.op) {
                 if let Arg::Ref(r) = arg
@@ -69,21 +73,7 @@ pub fn validate(g: &Graph) -> Result<(), String> {
                     let rn = by_name
                         .get(r.as_str())
                         .ok_or_else(|| format!("unknown node `{r}`"))?;
-                    if rn.op == "param" {
-                        Ty::Any
-                    } else if let Some(rsig) = ops::signature(&rn.op) {
-                        rsig.outs
-                            .iter()
-                            .find(|(p, _)| *p == rn.out_port)
-                            .map(|(_, t)| t.clone())
-                            .ok_or_else(|| {
-                                format!("`{}` has no output port `{}`", rn.op, rn.out_port)
-                            })?
-                    } else {
-                        // Constructors and `match` carry no static signature;
-                        // their values were checked where they were built.
-                        Ty::Any
-                    }
+                    known_ty(g, &by_name, rn, 0)
                 }
             };
             if !accepts(want, &got) {
@@ -106,32 +96,16 @@ pub fn validate(g: &Graph) -> Result<(), String> {
             .get(e.to.0.as_str())
             .ok_or_else(|| format!("edge to unknown node `{}`", e.to.0))?;
         let tsig = ops::signature(&tn.op);
-        let sty = if sn.op == "param" {
-            &Ty::Any
-        } else if sn.op == "match" {
-            g.node_tys.get(&sn.name).unwrap_or(&Ty::Any)
-        } else if g.ctors.contains_key(&sn.op) {
-            if e.from.1 != sn.op {
-                return Err(format!(
-                    "`{}` only has the port `{}`, not `{}`",
-                    sn.op, sn.op, e.from.1
-                ));
-            }
-            &Ty::Any
-        } else if g.structs.contains_key(&sn.op) {
-            if e.from.1 != "out" {
-                return Err(format!("`{}` only has the port `out`", sn.op));
-            }
-            &Ty::Record
-        } else {
-            let ssig =
-                ops::signature(&sn.op).ok_or_else(|| format!("unknown operator `{}`", sn.op))?;
-            ssig.outs
-                .iter()
-                .find(|(p, _)| *p == e.from.1)
-                .map(|(_, t)| t)
-                .ok_or_else(|| format!("`{}` has no output port `{}`", sn.op, e.from.1))?
-        };
+        if g.ctors.contains_key(&sn.op) && e.from.1 != sn.op {
+            return Err(format!(
+                "`{}` only has the port `{}`, not `{}`",
+                sn.op, sn.op, e.from.1
+            ));
+        }
+        if g.structs.contains_key(&sn.op) && e.from.1 != "out" {
+            return Err(format!("`{}` only has the port `out`", sn.op));
+        }
+        let sty = known_ty(g, &by_name, sn, 0);
         if g.ctors.contains_key(&tn.op) || g.structs.contains_key(&tn.op) {
             return Err(format!(
                 "`{}` is a constructor; it takes no input edge",
@@ -151,7 +125,7 @@ pub fn validate(g: &Graph) -> Result<(), String> {
                 .map(|(_, t)| t)
                 .ok_or_else(|| format!("`{}` has no input port `{}`", tn.op, e.to.1))?
         };
-        if !accepts(tty, sty) {
+        if !accepts(tty, &sty) {
             return Err(format!(
                 "edge `{}.{}` -> `{}.{}` feeds {} into {}",
                 e.from.0,
@@ -300,6 +274,34 @@ fn check_match(g: &Graph, n: &Node, by_name: &BTreeMap<&str, &Node>) -> Result<(
             "`{}` on `{sum}` leaves out {}",
             n.name,
             missing.join(", ")
+        ));
+    }
+    Ok(())
+}
+
+/// A field read whose key is written out has to name a field the struct declares.
+fn check_field(g: &Graph, by_name: &BTreeMap<&str, &Node>, n: &Node) -> Result<(), String> {
+    let Some(Arg::Ref(src)) = n.args.get("r") else {
+        return Ok(());
+    };
+    let Some(Arg::Lit(Value::Text(key))) = n.args.get("key") else {
+        return Ok(());
+    };
+    let Some(src) = by_name.get(src.as_str()) else {
+        return Ok(());
+    };
+    let Ty::Named(name) = known_ty(g, by_name, src, 0) else {
+        return Ok(());
+    };
+    let Some(fields) = g.structs.get(&name) else {
+        return Ok(());
+    };
+    if !fields.iter().any(|(f, _)| f == key) {
+        let names: Vec<&str> = fields.iter().map(|(f, _)| f.as_str()).collect();
+        return Err(format!(
+            "`{}` reads `{key}`, which `{name}` does not have (it has {})",
+            n.name,
+            names.join(", ")
         ));
     }
     Ok(())

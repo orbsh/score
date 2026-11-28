@@ -1,0 +1,8 @@
+# 动态对象：形状未知，键可以是算出来的值（不是实参名）
+r = record(a: 1)
+k = lit(value: "b")
+r2 = put(r: r, key: k, value: 2)
+ks = keys(r: r2)
+yes = has(r: r2, key: "b")
+ks -> print
+yes -> print

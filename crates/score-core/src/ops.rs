@@ -175,6 +175,29 @@ fn table() -> &'static BTreeMap<&'static str, Sig> {
                     outs: vec![("out", Ty::Text)],
                 },
             ),
+            // The dynamic side: an object of unknown shape. Its keys only have
+            // to be Text values, not names in the source.
+            (
+                "put",
+                Sig {
+                    ins: vec![("r", Ty::Record), ("key", Ty::Text), ("value", Ty::Any)],
+                    outs: vec![("out", Ty::Record)],
+                },
+            ),
+            (
+                "keys",
+                Sig {
+                    ins: vec![("r", Ty::Record)],
+                    outs: vec![("out", Ty::List(Box::new(Ty::Text)))],
+                },
+            ),
+            (
+                "has",
+                Sig {
+                    ins: vec![("r", Ty::Record), ("key", Ty::Text)],
+                    outs: vec![("out", Ty::Bool)],
+                },
+            ),
         ];
         entries.into_iter().collect()
     })
@@ -324,6 +347,35 @@ pub fn apply(op: &str, args: &BTreeMap<&str, Value>) -> Result<Value, String> {
             "`{op}` runs a def per element and is driven by the runtime, not by `apply`"
         )),
         "param" => Err("a parameter is seeded by the runtime, it never fires".to_string()),
+        "put" => {
+            let r = get("r")?;
+            let kv = get("key")?;
+            let key = as_text(op, "key", &kv)?;
+            let Value::Record(fields) = &r else {
+                return Err(format!("`put` wants a record, got {}", type_of(&r).name()));
+            };
+            let mut out = fields.clone();
+            out.insert(key.to_string(), get("value")?);
+            Ok(Value::Record(out))
+        }
+        "keys" => {
+            let r = get("r")?;
+            let Value::Record(fields) = &r else {
+                return Err(format!("`keys` wants a record, got {}", type_of(&r).name()));
+            };
+            Ok(Value::List(
+                fields.keys().map(|k| Value::Text(k.clone())).collect(),
+            ))
+        }
+        "has" => {
+            let r = get("r")?;
+            let kv = get("key")?;
+            let key = as_text(op, "key", &kv)?;
+            let Value::Record(fields) = &r else {
+                return Err(format!("`has` wants a record, got {}", type_of(&r).name()));
+            };
+            Ok(Value::Bool(fields.contains_key(key)))
+        }
         "tag" => {
             let v = get("v")?;
             match &v {

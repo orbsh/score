@@ -47,6 +47,54 @@ fn newlines_are_layout() {
 }
 
 #[test]
+fn a_record_is_a_dictionary() {
+    let g = build(include_str!("../../../examples/dict.score"));
+    let run = exec::run(&g, false).expect("run");
+    assert_eq!(
+        run.values.get(&("ks".to_string(), "out".to_string())),
+        Some(&Value::List(vec![
+            Value::Text("a".to_string()),
+            Value::Text("b".to_string())
+        ]))
+    );
+    assert_eq!(
+        run.values.get(&("yes".to_string(), "out".to_string())),
+        Some(&Value::Bool(true))
+    );
+}
+
+#[test]
+fn a_struct_is_not_a_dictionary() {
+    let src = "struct Person {\n  name: Text\n  age: Int\n}\np = Person(name: \"ada\", age: 36)\nx = put(r: p, key: \"z\", value: 1)\n";
+    let g2 = parser::parse(src).expect("parse");
+    let e = validate::validate(&g2).expect_err("a struct is not a record");
+    assert!(e.contains("wants Record"), "{e}");
+    assert!(e.contains("got Person"), "{e}");
+}
+
+#[test]
+fn a_field_read_carries_the_field_type() {
+    let src = "struct Person {\n  name: Text\n  age: Int\n}\ndef id_int(n: Int) -> (out: Int) {\n  out = add(a: n, b: 0)\n}\np = Person(name: \"ada\", age: 36)\na = get(r: p, key: \"age\")\nok = id_int(n: a)\n";
+    let g = build(src);
+
+    let bad = format!(
+        "{}def id_text(t: Text) -> (out: Text) {{\n  out = concat(a: t, b: \"\")\n}}\nbad = id_text(t: a)\n",
+        src
+    );
+    let e = parser::parse(&bad).expect_err("a Text port cannot take an Int field");
+    assert!(e.contains("wants Text, got Int"), "{e}");
+    assert_eq!(g.nodes.iter().filter(|n| n.name == "ok").count(), 1);
+}
+
+#[test]
+fn a_field_the_struct_lacks_is_rejected() {
+    let src = "struct Person {\n  name: Text\n  age: Int\n}\np = Person(name: \"ada\", age: 36)\nx = get(r: p, key: \"nmae\")\n";
+    let g = parser::parse(src).expect("parse");
+    let e = validate::validate(&g).expect_err("validate");
+    assert!(e.contains("does not have"), "{e}");
+}
+
+#[test]
 fn a_list_names_what_it_holds() {
     let src = "def total(xs: List<Int>) -> (out: Int) {\n  out = sum(xs: xs)\n}\nxs = range(n: 4)\nt = total(xs: xs)\n";
     let g = build(src);

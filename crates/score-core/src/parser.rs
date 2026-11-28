@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 use crate::ast::{Arg, Attrs, BinOp, Ctor, Edge, Expr, Graph, Guard, Node};
 use crate::lexer::{Tok, lex};
 use crate::ops;
+use crate::types::known_ty;
 use crate::value::{Ty, Value, accepts, type_of};
 
 struct Def {
@@ -38,8 +39,8 @@ pub fn parse(src: &str) -> Result<Graph, String> {
     let mut decls = Decls::default();
     let mut consts: BTreeMap<String, Value> = BTreeMap::new();
     let mut g = parse_lines(&lines, &mut decls, &mut consts, None)?;
-    g.ctors = decls.ctors;
-    g.structs = decls.structs;
+    debug_assert_eq!(g.ctors, decls.ctors);
+    debug_assert_eq!(g.structs, decls.structs);
     g.decl_attrs = decls.attrs;
     g.sigs = decls
         .defs
@@ -221,13 +222,15 @@ fn parse_lines(
                         None => Vec::new(),
                     };
                     tags.push(tag.clone());
-                    defs.ctors.insert(
-                        tag,
-                        Ctor {
-                            sum: name.clone(),
-                            fields,
-                        },
-                    );
+                    let ctor = Ctor {
+                        sum: name.clone(),
+                        fields,
+                    };
+                    // The graph owns the declarations from the moment they are
+                    // read: both passes read types through `types::known_ty`,
+                    // which asks the graph, not the parser's own tables.
+                    g.ctors.insert(tag.clone(), ctor.clone());
+                    defs.ctors.insert(tag, ctor);
                     j += 1;
                 }
                 if j == lines.len() {
@@ -259,6 +262,7 @@ fn parse_lines(
                 if j == lines.len() {
                     return Err(format!("`struct {name}` has no closing `}}`"));
                 }
+                g.structs.insert(name.clone(), fields.clone());
                 defs.structs.insert(name.clone(), fields);
                 let decorated = std::mem::take(&mut attrs);
                 if !decorated.is_empty() {
@@ -858,14 +862,9 @@ fn inline_def(
             let sn = g
                 .node(&slot.0)
                 .ok_or_else(|| format!("unknown node `{}`", slot.0))?;
-            let ssig = ops::signature(&sn.op)
-                .ok_or_else(|| format!("`{}` cannot feed `{op_name}.{p}`", sn.op))?;
-            let got = ssig
-                .outs
-                .iter()
-                .find(|(o, _)| *o == slot.1)
-                .map(|(_, t)| t.clone())
-                .ok_or_else(|| format!("`{}` has no output `{}`", sn.op, slot.1))?;
+            let by_name: BTreeMap<&str, &Node> =
+                g.nodes.iter().map(|n| (n.name.as_str(), n)).collect();
+            let got = known_ty(g, &by_name, sn, 0);
             if !accepts(ty, &got) {
                 return Err(format!(
                     "`{op_name}.{p}` wants {}, got {}",
@@ -883,17 +882,9 @@ fn inline_def(
             Arg::Sub(_) => Ty::Any,
             Arg::Ref(r) => {
                 let rn = g.node(r).ok_or_else(|| format!("unknown node `{r}`"))?;
-                match ops::signature(&rn.op) {
-                    Some(rsig) => rsig
-                        .outs
-                        .iter()
-                        .find(|(o, _)| *o == rn.out_port)
-                        .map(|(_, t)| t.clone())
-                        .ok_or_else(|| format!("`{}` has no output `{}`", rn.op, rn.out_port))?,
-                    // A constructor's own port carries the variant; its type is
-                    // whatever the field declares, checked where it was built.
-                    None => Ty::Any,
-                }
+                let by_name: BTreeMap<&str, &Node> =
+                    g.nodes.iter().map(|n| (n.name.as_str(), n)).collect();
+                known_ty(g, &by_name, rn, 0)
             }
         };
         if !accepts(ty, &got) {
