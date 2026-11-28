@@ -9,7 +9,14 @@ struct Person {
   age: Int
 }
 
+@doc("端口上可以直接写声明的类型")
+def describe(s: Shape) -> (out: Text) {
+  out = lit(value: "a shape")
+}
+
 c = Circle(r: 3)
 p = Person(name: "ada", age: 36)
+d = describe(s: c)
 c -> print
 p -> print
+d -> print

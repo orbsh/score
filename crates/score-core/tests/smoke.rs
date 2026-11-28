@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use score_core::{Graph, Value, exec, parser, validate};
+use score_core::{Graph, Ty, Value, exec, parser, validate};
 
 fn build(src: &str) -> Graph {
     let g = parser::parse(src).expect("parse");
@@ -44,6 +44,24 @@ fn newlines_are_layout() {
     let b = parser::parse(split).expect("split");
     assert_eq!(a.nodes.len(), b.nodes.len());
     assert_eq!(a.edges.len(), b.edges.len());
+}
+
+#[test]
+fn a_declared_type_can_name_a_port() {
+    let src = "enum Shape {\n  Circle { r: Int }\n}\n\ndef f(s: Shape) -> (out: Text) {\n  out = lit(value: \"ok\")\n}\n";
+    let g = build(src);
+    assert_eq!(
+        g.sigs.get("f").map(|(params, _)| params[0].1.clone()),
+        Some(Ty::Named("Shape".to_string()))
+    );
+}
+
+#[test]
+fn an_undeclared_type_name_is_rejected() {
+    let src = "def f(x: Shap) -> (out: Int) {\n  out = lit(value: 1)\n}\n";
+    let g = parser::parse(src).expect("parse");
+    let e = validate::validate(&g).expect_err("validate");
+    assert!(e.contains("does not declare"), "{e}");
 }
 
 #[test]

@@ -805,9 +805,9 @@ fn inline_def(
                 .outs
                 .iter()
                 .find(|(o, _)| *o == slot.1)
-                .map(|(_, t)| *t)
+                .map(|(_, t)| t.clone())
                 .ok_or_else(|| format!("`{}` has no output `{}`", sn.op, slot.1))?;
-            if !accepts(*ty, got) {
+            if !accepts(ty, &got) {
                 return Err(format!(
                     "`{op_name}.{p}` wants {}, got {}",
                     ty.name(),
@@ -824,16 +824,20 @@ fn inline_def(
             Arg::Sub(_) => Ty::Any,
             Arg::Ref(r) => {
                 let rn = g.node(r).ok_or_else(|| format!("unknown node `{r}`"))?;
-                let rsig = ops::signature(&rn.op)
-                    .ok_or_else(|| format!("`{}` cannot feed `{op_name}.{p}`", rn.op))?;
-                rsig.outs
-                    .iter()
-                    .find(|(o, _)| *o == rn.out_port)
-                    .map(|(_, t)| *t)
-                    .ok_or_else(|| format!("`{}` has no output `{}`", rn.op, rn.out_port))?
+                match ops::signature(&rn.op) {
+                    Some(rsig) => rsig
+                        .outs
+                        .iter()
+                        .find(|(o, _)| *o == rn.out_port)
+                        .map(|(_, t)| t.clone())
+                        .ok_or_else(|| format!("`{}` has no output `{}`", rn.op, rn.out_port))?,
+                    // A constructor's own port carries the variant; its type is
+                    // whatever the field declares, checked where it was built.
+                    None => Ty::Any,
+                }
             }
         };
-        if !accepts(*ty, got) {
+        if !accepts(ty, &got) {
             return Err(format!(
                 "`{op_name}.{p}` wants {}, got {}",
                 ty.name(),
@@ -1009,13 +1013,13 @@ fn check_fields(
                         .outs
                         .iter()
                         .find(|(p, _)| *p == rn.out_port)
-                        .map(|(_, t)| *t)
+                        .map(|(_, t)| t.clone())
                         .ok_or_else(|| format!("`{}` has no output `{}`", rn.op, rn.out_port))?,
                     None => Ty::Any,
                 }
             }
         };
-        if !accepts(*ty, got) {
+        if !accepts(ty, &got) {
             return Err(format!(
                 "`{op}.{f}` wants {}, got {}",
                 ty.name(),
@@ -1179,7 +1183,9 @@ fn parse_ty(tok: Option<&Tok>) -> Result<Ty, String> {
             "Bool" => Ok(Ty::Bool),
             "Unit" => Ok(Ty::Unit),
             "Any" => Ok(Ty::Any),
-            other => Err(format!("unknown type `{other}`")),
+            // Anything else names a type the program declares with `enum` or
+            // `struct`; validate checks that the name exists.
+            other => Ok(Ty::Named(other.to_string())),
         },
         other => Err(format!("expected a type, got {other:?}")),
     }

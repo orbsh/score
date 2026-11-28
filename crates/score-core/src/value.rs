@@ -18,7 +18,7 @@ pub enum Value {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Ty {
     Int,
     Text,
@@ -27,10 +27,12 @@ pub enum Ty {
     List,
     Record,
     Any,
+    /// A type the program declared with `enum` or `struct`.
+    Named(String),
 }
 
 impl Ty {
-    pub fn name(self) -> &'static str {
+    pub fn name(&self) -> &str {
         match self {
             Ty::Int => "Int",
             Ty::Text => "Text",
@@ -39,6 +41,7 @@ impl Ty {
             Ty::List => "List",
             Ty::Record => "Record",
             Ty::Any => "Any",
+            Ty::Named(n) => n,
         }
     }
 }
@@ -55,8 +58,8 @@ pub fn type_of(v: &Value) -> Ty {
     }
 }
 
-pub fn accepts(declared: Ty, actual: Ty) -> bool {
-    declared == Ty::Any || actual == Ty::Any || declared == actual
+pub fn accepts(declared: &Ty, actual: &Ty) -> bool {
+    *declared == Ty::Any || *actual == Ty::Any || declared == actual
 }
 
 impl Value {

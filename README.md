@@ -27,6 +27,8 @@ A record is built from its arguments (`r = record(name: "ada", age: 36)`) and re
 
 Types are declared with braces, like the rest of the language: `enum Shape { Circle { r: Int } Rect { w: Int, h: Int } }` and `struct Person { name: Text, age: Int }`. A variant name is also the port its value leaves on, so `c = Circle(r: 3)` is read at `c`'s `Circle` port; a struct name is its own constructor and yields a record.
 
+A declared type can be named on a port: `def describe(s: Shape) -> (out: Text)`. A name the program does not declare is rejected, since the parser cannot tell a typo from a type. `List` and `Record` still carry no member types.
+
 Attributes are compile-time tags written `@name` or `@name(value)` in front of an element — on their own line above it, or inline before it — and today only `@doc("…")` and `@tag(x)` exist. An attribute never becomes a value and never changes what a run does, so it stays out of the graph fingerprint; an unknown name is a parse error rather than a word that is silently ignored, and an attribute with nothing after it is an error too.
 
 `map` and `fold` take a def as their body: the def's graph is cloned once as a template whose param nodes the runtime seeds, and it runs once per element (`fold` threads the accumulator through the same body). `filter`, `any` and `all` take the same template and read a Bool from it.

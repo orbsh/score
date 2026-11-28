@@ -14,6 +14,23 @@ pub fn validate(g: &Graph) -> Result<(), String> {
         }
     }
 
+    // A named type has to exist: the parser cannot tell a typo from a type.
+    for (name, (params, outs)) in &g.sigs {
+        for (port, ty) in params.iter().chain(outs.iter()) {
+            check_named(g, ty, &format!("{name}.{port}"))?;
+        }
+    }
+    for ctor in g.ctors.values() {
+        for (field, ty) in &ctor.fields {
+            check_named(g, ty, &format!("{}.{field}", ctor.sum))?;
+        }
+    }
+    for (name, fields) in &g.structs {
+        for (field, ty) in fields {
+            check_named(g, ty, &format!("{name}.{field}"))?;
+        }
+    }
+
     for n in &g.nodes {
         if g.ctors.contains_key(&n.op) || g.structs.contains_key(&n.op) {
             // A constructor's arguments were checked by the parser.
@@ -56,14 +73,14 @@ pub fn validate(g: &Graph) -> Result<(), String> {
                         rsig.outs
                             .iter()
                             .find(|(p, _)| *p == rn.out_port)
-                            .map(|(_, t)| *t)
+                            .map(|(_, t)| t.clone())
                             .ok_or_else(|| {
                                 format!("`{}` has no output port `{}`", rn.op, rn.out_port)
                             })?
                     }
                 }
             };
-            if !accepts(*want, got) {
+            if !accepts(want, &got) {
                 return Err(format!(
                     "`{}.{port}` wants {}, got {}",
                     n.name,
@@ -118,7 +135,7 @@ pub fn validate(g: &Graph) -> Result<(), String> {
             .iter()
             .find(|(p, _)| *p == e.to.1)
             .ok_or_else(|| format!("`{}` has no input port `{}`", tn.op, e.to.1))?;
-        if !accepts(*tty, *sty) {
+        if !accepts(tty, sty) {
             return Err(format!(
                 "edge `{}.{}` -> `{}.{}` feeds {} into {}",
                 e.from.0,
@@ -207,6 +224,18 @@ fn reaches(g: &Graph, from: &str, to: &str) -> bool {
         }
     }
     false
+}
+
+fn check_named(g: &Graph, ty: &Ty, what: &str) -> Result<(), String> {
+    if let Ty::Named(name) = ty
+        && !g.structs.contains_key(name)
+        && !g.ctors.values().any(|c| c.sum == *name)
+    {
+        return Err(format!(
+            "`{what}` names the type `{name}`, which this program does not declare"
+        ));
+    }
+    Ok(())
 }
 
 fn check_expr(e: &Expr, src: &str, sig: &'static ops::Sig) -> Result<(), String> {
