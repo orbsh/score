@@ -47,6 +47,40 @@ fn newlines_are_layout() {
 }
 
 #[test]
+fn a_list_grows() {
+    let g = build(include_str!("../../../examples/grow.score"));
+    let run = exec::run(&g, false).expect("run");
+    assert_eq!(
+        run.values.get(&("ys".to_string(), "out".to_string())),
+        Some(&Value::List(vec![
+            Value::Int(0),
+            Value::Int(1),
+            Value::Int(2),
+            Value::Int(99)
+        ]))
+    );
+    assert_eq!(
+        run.values.get(&("zs".to_string(), "out".to_string())),
+        Some(&Value::List(vec![
+            Value::Int(0),
+            Value::Int(1),
+            Value::Int(2),
+            Value::Int(0),
+            Value::Int(1),
+            Value::Int(2),
+            Value::Int(99)
+        ]))
+    );
+}
+
+#[test]
+fn push_refuses_a_non_list() {
+    let g = build("t = lit(value: \"abc\")\nx = push(xs: t, v: t)\n");
+    let e = exec::run(&g, false).expect_err("run");
+    assert!(e.contains("wants a list"), "{e}");
+}
+
+#[test]
 fn a_value_goes_to_text_and_back() {
     let g = build(include_str!("../../../examples/convert.score"));
     let run = exec::run(&g, false).expect("run");
@@ -557,13 +591,42 @@ fn journal_has_one_entry_per_firing() {
 }
 
 #[test]
-fn def_inlines_at_the_call_site() {
+fn two_calls_share_one_body() {
+    let src = "def double(x: Int) -> (result) {\n  result = add(a: x, b: x)\n}\na = lit(value: 1)\nb = lit(value: 2)\nm = double(x: a)\nn = double(x: b)\n";
+    let g = build(src);
+    assert_eq!(g.defs.len(), 1, "a body is kept once, not cloned per site");
+    let run = exec::run(&g, false).expect("run");
+    assert_eq!(
+        run.values.get(&("m".to_string(), "result".to_string())),
+        Some(&Value::Int(2))
+    );
+    assert_eq!(
+        run.values.get(&("n".to_string(), "result".to_string())),
+        Some(&Value::Int(4))
+    );
+}
+
+#[test]
+fn a_def_may_call_itself() {
+    let src = "def down(n: Int) -> (out: Int) {\n  less = lit(value: 0)\n  out = down(n: less)\n}\nstart = lit(value: 1)\nr = down(n: start)\n";
+    let g = build(src);
+    let e = exec::run(&g, false).expect_err("an endless self-call");
+    assert!(e.contains("frames deep"), "{e}");
+}
+
+#[test]
+fn a_def_call_runs_its_body() {
     let g = build(include_str!("../../../examples/def.score"));
     let run = exec::run(&g, false).expect("run");
     assert_eq!(
-        run.values.get(&("m".to_string(), "out".to_string())),
+        run.values.get(&("m".to_string(), "result".to_string())),
         Some(&Value::Int(42))
     );
+    assert!(
+        g.node("m").map(|n| n.op.as_str()) == Some("double"),
+        "a call is one node named after its def"
+    );
+    assert!(g.defs.contains_key("double"), "the body is kept once");
 }
 
 #[test]
@@ -572,7 +635,7 @@ fn def_accepts_a_literal_argument() {
     let g = build(src);
     let run = exec::run(&g, false).expect("run");
     assert_eq!(
-        run.values.get(&("m".to_string(), "out".to_string())),
+        run.values.get(&("m".to_string(), "result".to_string())),
         Some(&Value::Int(10))
     );
 }
@@ -580,8 +643,9 @@ fn def_accepts_a_literal_argument() {
 #[test]
 fn def_with_a_missing_argument_is_rejected() {
     let src = "def double(x: Int) -> (result) {\n  result = add(a: x, b: x)\n}\nn = lit(value: 1)\nm = double()\n";
-    let e = parser::parse(src).expect_err("must be invalid");
-    assert!(e.contains("needs `x"), "{e}");
+    let g = parser::parse(src).expect("parse");
+    let e = validate::validate(&g).expect_err("must be invalid");
+    assert!(e.contains("no source"), "{e}");
 }
 
 #[test]

@@ -39,6 +39,12 @@ pub fn known_ty(g: &Graph, by_name: &BTreeMap<&str, &Node>, n: &Node, depth: usi
     if let Some(t) = g.node_tys.get(&n.name) {
         return t.clone();
     }
+    // A call's type is the def's declared output: the body does not add to it.
+    if let Some((_, outs)) = g.sigs.get(&n.op)
+        && let Some((_, t)) = outs.iter().find(|(p, _)| *p == n.out_port)
+    {
+        return t.clone();
+    }
     // A field read is checked before the operator table: `get` declares its
     // output as Any, while the field's type is often known exactly.
     if n.op == "get" {

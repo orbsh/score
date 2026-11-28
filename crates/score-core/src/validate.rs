@@ -41,8 +41,9 @@ pub fn validate(g: &Graph) -> Result<(), String> {
             check_match(g, n, &by_name)?;
             continue;
         }
-        let sig = ops::signature(&n.op).ok_or_else(|| format!("unknown operator `{}`", n.op))?;
-        if !sig.outs.iter().any(|(p, _)| *p == n.out_port) && n.op != "param" {
+        let (ins, outs) =
+            ports(g, &n.op).ok_or_else(|| format!("unknown operator or def `{}`", n.op))?;
+        if !outs.iter().any(|(p, _)| *p == n.out_port) && n.op != "param" {
             return Err(format!("`{}` has no output port `{}`", n.op, n.out_port));
         }
         if n.op == "get" {
@@ -57,8 +58,7 @@ pub fn validate(g: &Graph) -> Result<(), String> {
                 }
                 continue;
             }
-            let (_, want) = sig
-                .ins
+            let (_, want) = ins
                 .iter()
                 .find(|(p, _)| *p == port.as_str())
                 .ok_or_else(|| format!("`{}` has no input port `{}`", n.op, port))?;
@@ -95,7 +95,7 @@ pub fn validate(g: &Graph) -> Result<(), String> {
         let tn = by_name
             .get(e.to.0.as_str())
             .ok_or_else(|| format!("edge to unknown node `{}`", e.to.0))?;
-        let tsig = ops::signature(&tn.op);
+        let tports = ports(g, &tn.op);
         if g.ctors.contains_key(&sn.op) && e.from.1 != sn.op {
             return Err(format!(
                 "`{}` only has the port `{}`, not `{}`",
@@ -112,20 +112,19 @@ pub fn validate(g: &Graph) -> Result<(), String> {
                 tn.op
             ));
         }
-        let tty = if tn.op == "match" {
+        let tty: Ty = if tn.op == "match" {
             if e.to.1 != "on" {
                 return Err(format!("`{}` only takes `on`", tn.name));
             }
-            &Ty::Any
+            Ty::Any
         } else {
-            let tsig = tsig.ok_or_else(|| format!("unknown operator `{}`", tn.op))?;
-            tsig.ins
-                .iter()
+            let (ins, _) = tports.ok_or_else(|| format!("unknown operator or def `{}`", tn.op))?;
+            ins.iter()
                 .find(|(p, _)| *p == e.to.1)
-                .map(|(_, t)| t)
+                .map(|(_, t)| t.clone())
                 .ok_or_else(|| format!("`{}` has no input port `{}`", tn.op, e.to.1))?
         };
-        if !accepts(tty, &sty) {
+        if !accepts(&tty, &sty) {
             return Err(format!(
                 "edge `{}.{}` -> `{}.{}` feeds {} into {}",
                 e.from.0,
@@ -146,9 +145,10 @@ pub fn validate(g: &Graph) -> Result<(), String> {
             return Err(format!("two edges into `{}.{}`", e.to.0, e.to.1));
         }
         if let Guard::When(expr) = &e.guard
-            && let Some(src_sig) = ops::signature(&sn.op)
+            && let Some((_, outs)) = ports(g, &sn.op)
         {
-            check_expr(expr, &e.from.0, src_sig)?;
+            let names: Vec<String> = outs.into_iter().map(|(p, _)| p).collect();
+            check_expr(expr, &e.from.0, &names)?;
         }
     }
 
@@ -156,9 +156,10 @@ pub fn validate(g: &Graph) -> Result<(), String> {
         if g.ctors.contains_key(&n.op) || g.structs.contains_key(&n.op) || n.op == "match" {
             continue;
         }
-        let sig = ops::signature(&n.op).ok_or_else(|| format!("unknown operator `{}`", n.op))?;
-        for (port, _) in &sig.ins {
-            let has_arg = n.args.contains_key(*port);
+        let (ins, _) =
+            ports(g, &n.op).ok_or_else(|| format!("unknown operator or def `{}`", n.op))?;
+        for (port, _) in &ins {
+            let has_arg = n.args.contains_key(port);
             let has_edge = g.edges.iter().any(|e| e.to.0 == n.name && e.to.1 == *port);
             if has_arg && has_edge {
                 return Err(format!(
@@ -307,6 +308,26 @@ fn check_field(g: &Graph, by_name: &BTreeMap<&str, &Node>, n: &Node) -> Result<(
     Ok(())
 }
 
+/// The ports of a node's operator: a built-in signature, or a def's declared
+/// one — a call is a node like any other, so it answers the same questions.
+type Ports = (Vec<(String, Ty)>, Vec<(String, Ty)>);
+
+fn ports(g: &Graph, op: &str) -> Option<Ports> {
+    if let Some(sig) = ops::signature(op) {
+        return Some((
+            sig.ins
+                .iter()
+                .map(|(p, t)| ((*p).to_string(), t.clone()))
+                .collect(),
+            sig.outs
+                .iter()
+                .map(|(p, t)| ((*p).to_string(), t.clone()))
+                .collect(),
+        ));
+    }
+    g.sigs.get(op).cloned()
+}
+
 fn check_named(g: &Graph, ty: &Ty, what: &str) -> Result<(), String> {
     if let Ty::Named(name) = ty
         && !g.structs.contains_key(name)
@@ -319,20 +340,20 @@ fn check_named(g: &Graph, ty: &Ty, what: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn check_expr(e: &Expr, src: &str, sig: &'static ops::Sig) -> Result<(), String> {
+fn check_expr(e: &Expr, src: &str, outs: &[String]) -> Result<(), String> {
     match e {
         Expr::Lit(_) => Ok(()),
         Expr::Local(name) => {
-            if sig.outs.iter().any(|(p, _)| p == name) {
+            if outs.iter().any(|p| p == name) {
                 Ok(())
             } else {
                 Err(format!("`{name}` is not a port of `{src}`"))
             }
         }
-        Expr::Not(x) => check_expr(x, src, sig),
+        Expr::Not(x) => check_expr(x, src, outs),
         Expr::Bin(_, a, b) => {
-            check_expr(a, src, sig)?;
-            check_expr(b, src, sig)
+            check_expr(a, src, outs)?;
+            check_expr(b, src, outs)
         }
     }
 }

@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::ast::{Arg, BinOp, Expr, Graph, Guard, SubGraph};
+use crate::ast::{Arg, BinOp, Body, Expr, Graph, Guard, Node, SubGraph};
 use crate::ops;
 use crate::value::{Value, type_of};
 
@@ -39,6 +39,251 @@ pub fn run(g: &Graph, trace: bool) -> Result<Run, String> {
     run_from(g, trace, &BTreeMap::new(), &BTreeMap::new(), 0)
 }
 
+/// Where a frame hands its results: the call node in the parent frame, and each
+/// declared output with the slot that carries it.
+type Caller = Option<(String, Vec<(String, (String, String))>)>;
+
+/// One frame per running graph: the top-level program, or a def body being run
+/// for a call. State that used to live per run lives per frame now, because the
+/// same body can be running several times at once (recursion).
+struct Frame<'a> {
+    g: &'a Graph,
+    values: BTreeMap<(String, String), Value>,
+    stamps: BTreeMap<(String, String), u64>,
+    budgets: Vec<Option<u32>>,
+    fired: BTreeMap<String, Vec<u64>>,
+    seeded: BTreeSet<String>,
+    /// A call this frame fired and is waiting on: its node name and the marks
+    /// it fired with. The call is neither done nor re-fireable until then.
+    pending: Option<(String, Vec<u64>)>,
+    /// Where the current pass has got to. A pass fires nodes in order, so a
+    /// node fired early does not jump ahead of the ones after it in the same
+    /// round — that is what keeps a ring's downstream nodes seeing each turn.
+    cursor: usize,
+    fired_in_pass: bool,
+    caller: Caller,
+    order: Vec<String>,
+}
+
+impl<'a> Frame<'a> {
+    fn new(
+        g: &'a Graph,
+        seed: &BTreeMap<(String, String), Value>,
+        budgets_seed: &BTreeMap<(String, String), u32>,
+        caller: Caller,
+    ) -> Self {
+        let mut values: BTreeMap<(String, String), Value> = seed.clone();
+        let mut stamps: BTreeMap<(String, String), u64> = BTreeMap::new();
+        let mut seeded: BTreeSet<String> = BTreeSet::new();
+        for (node, port) in seed.keys() {
+            stamps.insert((node.clone(), port.clone()), 1);
+            seeded.insert(node.clone());
+        }
+        let budgets = g
+            .edges
+            .iter()
+            .map(|e| {
+                if e.ring {
+                    budgets_seed.get(&e.to).copied().or(e.budget)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        values.retain(|_, _| true);
+        Frame {
+            g,
+            values,
+            stamps,
+            budgets,
+            fired: BTreeMap::new(),
+            seeded,
+            pending: None,
+            cursor: 0,
+            fired_in_pass: false,
+            caller,
+            order: Vec::new(),
+        }
+    }
+}
+
+enum Action<'a> {
+    Fire {
+        name: String,
+        op: String,
+        slot: (String, String),
+        out: Value,
+        marks: Vec<u64>,
+    },
+    Call {
+        name: String,
+        op: String,
+        marks: Vec<u64>,
+        inputs: BTreeMap<String, Value>,
+        body: &'a Body,
+    },
+}
+
+/// The input ports of a node: an operator's declared ones, a def's parameters,
+/// or — for a constructor, `match`, or a variadic operator — whatever its
+/// arguments and edges name.
+fn ins_of(g: &Graph, op: &str) -> Option<Vec<String>> {
+    // A variadic operator takes its arguments as fields, so its ports are
+    // whatever the node names.
+    if ops::is_variadic(op) {
+        return None;
+    }
+    if let Some(sig) = ops::signature(op) {
+        return Some(sig.ins.iter().map(|(p, _)| (*p).to_string()).collect());
+    }
+    g.sigs
+        .get(op)
+        .map(|(ins, _)| ins.iter().map(|(p, _)| p.clone()).collect())
+}
+
+fn next_action<'a>(
+    f: &Frame<'a>,
+    root: &'a Graph,
+    from: usize,
+) -> Result<Option<(usize, Action<'a>)>, String> {
+    for (i, node) in f.g.nodes.iter().enumerate().skip(from) {
+        if f.seeded.contains(&node.name) {
+            continue;
+        }
+        if let Some((pending, _)) = &f.pending
+            && *pending == node.name
+        {
+            continue;
+        }
+        if ops::signature(&node.op).is_none()
+            && !f.g.ctors.contains_key(&node.op)
+            && !f.g.structs.contains_key(&node.op)
+            && !f.g.sigs.contains_key(&node.op)
+            && node.op != "match"
+        {
+            return Err(format!("unknown operator `{}`", node.op));
+        }
+        let ports: Vec<String> =
+            ins_of(f.g, &node.op).unwrap_or_else(|| node.args.keys().cloned().collect());
+        let mut inputs: BTreeMap<String, Value> = BTreeMap::new();
+        let mut subs: BTreeMap<String, SubGraph> = BTreeMap::new();
+        let mut marks: Vec<u64> = Vec::new();
+        let mut ready = true;
+        for port in &ports {
+            match node.args.get(port) {
+                Some(Arg::Sub(sub)) => {
+                    subs.insert(port.clone(), (**sub).clone());
+                    marks.push(0);
+                }
+                Some(Arg::Lit(v)) => {
+                    inputs.insert(port.clone(), v.clone());
+                    marks.push(0);
+                }
+                Some(Arg::Ref(r)) => {
+                    let rn = f.g.node(r).ok_or_else(|| format!("unknown node `{r}`"))?;
+                    let key = (r.clone(), rn.out_port.clone());
+                    match f.values.get(&key) {
+                        Some(v) => {
+                            marks.push(f.stamps.get(&key).copied().unwrap_or(0));
+                            inputs.insert(port.clone(), v.clone());
+                        }
+                        None => {
+                            ready = false;
+                            break;
+                        }
+                    }
+                }
+                None => {
+                    let key = (node.name.clone(), port.clone());
+                    match f.values.get(&key) {
+                        Some(v) => {
+                            marks.push(f.stamps.get(&key).copied().unwrap_or(0));
+                            inputs.insert(port.clone(), v.clone());
+                        }
+                        None => {
+                            ready = false;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if !ready || f.fired.get(&node.name) == Some(&marks) {
+            continue;
+        }
+        if let Some(body) = root.defs.get(&node.op) {
+            return Ok(Some((
+                i,
+                Action::Call {
+                    name: node.name.clone(),
+                    op: node.op.clone(),
+                    marks,
+                    inputs,
+                    body,
+                },
+            )));
+        }
+        let out = eval_node(f.g, node, &inputs, &subs)?;
+        let slot = match &out {
+            Value::Variant { tag, .. } => (node.name.clone(), tag.clone()),
+            _ => (node.name.clone(), node.out_port.clone()),
+        };
+        return Ok(Some((
+            i,
+            Action::Fire {
+                name: node.name.clone(),
+                op: node.op.clone(),
+                slot,
+                out,
+                marks,
+            },
+        )));
+    }
+    Ok(None)
+}
+
+fn eval_node(
+    g: &Graph,
+    node: &Node,
+    inputs: &BTreeMap<String, Value>,
+    subs: &BTreeMap<String, SubGraph>,
+) -> Result<Value, String> {
+    if !subs.is_empty() && node.op == "match" {
+        let borrowed: BTreeMap<&str, &SubGraph> =
+            subs.iter().map(|(k, v)| (k.as_str(), v)).collect();
+        let borrowed_inputs: BTreeMap<&str, Value> = inputs
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.clone()))
+            .collect();
+        return run_match(&borrowed, &borrowed_inputs);
+    }
+    if !subs.is_empty() {
+        let borrowed: BTreeMap<&str, &SubGraph> =
+            subs.iter().map(|(k, v)| (k.as_str(), v)).collect();
+        let borrowed_inputs: BTreeMap<&str, Value> = inputs
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.clone()))
+            .collect();
+        return run_container(&node.op, &borrowed, &borrowed_inputs);
+    }
+    if g.ctors.contains_key(&node.op) {
+        return Ok(Value::Variant {
+            tag: node.op.clone(),
+            fields: inputs.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        });
+    }
+    if g.structs.contains_key(&node.op) {
+        return Ok(Value::Record(
+            inputs.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        ));
+    }
+    let borrowed: BTreeMap<&str, Value> = inputs
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.clone()))
+        .collect();
+    ops::apply(&node.op, &borrowed)
+}
+
 /// Resume: values already in the journal seed the run, and their edges are
 /// re-delivered so downstream nodes see the same inputs they would have seen.
 pub fn run_from(
@@ -48,23 +293,6 @@ pub fn run_from(
     budgets_seed: &BTreeMap<(String, String), u32>,
     seq_base: usize,
 ) -> Result<Run, String> {
-    let mut values: BTreeMap<(String, String), Value> = seed.clone();
-    let mut stamps: BTreeMap<(String, String), u64> = BTreeMap::new();
-    for key in seed.keys() {
-        stamps.insert(key.clone(), 1);
-    }
-    let mut budgets: Vec<Option<u32>> = g
-        .edges
-        .iter()
-        .map(|e| {
-            if e.ring {
-                budgets_seed.get(&e.to).copied().or(e.budget)
-            } else {
-                None
-            }
-        })
-        .collect();
-    let mut seeded: BTreeSet<String> = BTreeSet::new();
     for (node, port) in seed.keys() {
         let n = g.node(node).ok_or_else(|| {
             format!("the journal has `{node}`, which is not a node of this graph")
@@ -75,173 +303,212 @@ pub fn run_from(
                 n.out_port
             ));
         }
-        seeded.insert(node.clone());
     }
+
+    let mut stack: Vec<Frame> = vec![Frame::new(g, seed, budgets_seed, None)];
     let mut entries: Vec<Entry> = Vec::new();
     let mut seq = seq_base;
     for (slot, v) in seed {
-        for ((node, port), left) in deliver(g, slot, v, &mut values, &mut stamps, &mut budgets)? {
+        let spent = {
+            let f = stack.last_mut().unwrap();
+            deliver(f.g, slot, v, &mut f.values, &mut f.stamps, &mut f.budgets)?
+        };
+        for ((node, port), left) in spent {
+            seq += 1;
             entries.push(Entry {
-                seq: seq + 1,
+                seq,
                 node,
                 op: "@budget".to_string(),
                 port,
                 value: Value::Int(left as i64),
                 kind: Kind::Budget,
             });
-            seq += 1;
         }
     }
 
-    // The stamps each node's inputs carried at its last firing: a node fires
-    // again only when one of them moved, which is what turns a ring.
-    let mut fired: BTreeMap<String, Vec<u64>> = BTreeMap::new();
-    let mut order: Vec<String> = Vec::new();
     let mut fires = 0usize;
-
     loop {
-        let mut progress = false;
-        for node in &g.nodes {
-            if seeded.contains(&node.name) {
-                continue;
-            }
-            let sig = ops::signature(&node.op);
-            if sig.is_none()
-                && !g.ctors.contains_key(&node.op)
-                && !g.structs.contains_key(&node.op)
-                && node.op != "match"
-            {
-                return Err(format!("unknown operator `{}`", node.op));
-            }
-            let mut inputs: BTreeMap<&str, Value> = BTreeMap::new();
-            let mut subs: BTreeMap<&str, &SubGraph> = BTreeMap::new();
-            let mut marks: Vec<u64> = Vec::new();
-            let mut ready = true;
-            let ports: Vec<&str> = match (sig, ops::is_variadic(&node.op)) {
-                (Some(sig), false) => sig.ins.iter().map(|(p, _)| *p).collect(),
-                _ => node.args.keys().map(|k| k.as_str()).collect(),
-            };
-            for port in &ports {
-                if let Some(arg) = node.args.get(*port) {
-                    match arg {
-                        Arg::Sub(sub) => {
-                            subs.insert(*port, sub);
-                            marks.push(0);
-                        }
-                        Arg::Lit(v) => {
-                            inputs.insert(*port, v.clone());
-                            marks.push(0);
-                        }
-                        Arg::Ref(r) => {
-                            let rn = g.node(r).ok_or_else(|| format!("unknown node `{r}`"))?;
-                            let key = (r.clone(), rn.out_port.clone());
-                            match values.get(&key) {
-                                Some(v) => {
-                                    marks.push(stamps.get(&key).copied().unwrap_or(0));
-                                    inputs.insert(*port, v.clone());
-                                }
-                                None => {
-                                    ready = false;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    let key = (node.name.clone(), (*port).to_string());
-                    match values.get(&key) {
-                        Some(v) => {
-                            marks.push(stamps.get(&key).copied().unwrap_or(0));
-                            inputs.insert(*port, v.clone());
-                        }
-                        None => {
-                            ready = false;
-                            break;
-                        }
+        let idx = stack.len() - 1;
+        let found = {
+            let f = &stack[idx];
+            next_action(f, g, f.cursor)?
+        };
+        let Some((at, action)) = found else {
+            if !stack[idx].fired_in_pass {
+                if idx == 0 {
+                    break;
+                }
+                // The frame has converged: hand each declared output to the
+                // call node that is waiting in the parent.
+                let child = stack.pop().expect("a child frame");
+                let (call_node, outs) = child
+                    .caller
+                    .clone()
+                    .expect("a frame below the root has a caller");
+                let parent = stack.last_mut().expect("the parent frame");
+                let pending = parent
+                    .pending
+                    .take()
+                    .ok_or_else(|| format!("`{call_node}` returned to no caller"))?;
+                let mut landed: Vec<(String, Value)> = Vec::new();
+                for (out_name, (node, port)) in &outs {
+                    let v = child
+                        .values
+                        .get(&(node.clone(), port.clone()))
+                        .cloned()
+                        .or_else(|| {
+                            child
+                                .values
+                                .iter()
+                                .find(|((n, _), _)| n == node)
+                                .map(|(_, v)| v.clone())
+                        })
+                        .ok_or_else(|| {
+                            format!("`{call_node}`: the body produced no `{out_name}`")
+                        })?;
+                    landed.push((out_name.clone(), v));
+                }
+                parent.fired.insert(call_node.clone(), pending.1);
+                parent.order.push(call_node.clone());
+                for (out_name, v) in landed {
+                    let slot = match &v {
+                        Value::Variant { tag, .. } => (call_node.clone(), tag.clone()),
+                        _ => (call_node.clone(), out_name),
+                    };
+                    seq += 1;
+                    entries.push(Entry {
+                        seq,
+                        node: call_node.clone(),
+                        op: "call".to_string(),
+                        port: slot.1.clone(),
+                        value: v.clone(),
+                        kind: Kind::Fire,
+                    });
+                    parent.values.insert(slot.clone(), v.clone());
+                    *parent.stamps.entry(slot.clone()).or_insert(0) += 1;
+                    let spent = deliver(
+                        parent.g,
+                        &slot,
+                        &v,
+                        &mut parent.values,
+                        &mut parent.stamps,
+                        &mut parent.budgets,
+                    )?;
+                    for ((node, port), left) in spent {
+                        seq += 1;
+                        entries.push(Entry {
+                            seq,
+                            node,
+                            op: "@budget".to_string(),
+                            port,
+                            value: Value::Int(left as i64),
+                            kind: Kind::Budget,
+                        });
                     }
                 }
-            }
-            if !ready || fired.get(&node.name) == Some(&marks) {
-                continue;
-            }
-            let out = if !subs.is_empty() && node.op == "match" {
-                run_match(&subs, &inputs)?
-            } else if !subs.is_empty() {
-                run_container(&node.op, &subs, &inputs)?
-            } else if g.ctors.contains_key(&node.op) {
-                Value::Variant {
-                    tag: node.op.clone(),
-                    fields: inputs
-                        .iter()
-                        .map(|(k, v)| ((*k).to_string(), v.clone()))
-                        .collect(),
-                }
-            } else if g.structs.contains_key(&node.op) {
-                Value::Record(
-                    inputs
-                        .iter()
-                        .map(|(k, v)| ((*k).to_string(), v.clone()))
-                        .collect(),
-                )
+                parent.cursor = 0;
+                parent.fired_in_pass = false;
             } else {
-                ops::apply(&node.op, &inputs)?
-            };
-            if trace {
-                println!("run {} ({}) -> {}", node.name, node.op, out);
+                stack[idx].cursor = 0;
+                stack[idx].fired_in_pass = false;
             }
-            entries.push(Entry {
-                seq: seq + 1,
-                node: node.name.clone(),
-                op: node.op.clone(),
-                port: node.out_port.clone(),
-                value: out.clone(),
-                kind: Kind::Fire,
-            });
-            seq += 1;
-            let slot = match &out {
-                Value::Variant { tag, .. } => (node.name.clone(), tag.clone()),
-                _ => (node.name.clone(), node.out_port.clone()),
-            };
-            values.insert(slot.clone(), out.clone());
-            *stamps.entry(slot.clone()).or_insert(0) += 1;
-            for ((node, port), left) in
-                deliver(g, &slot, &out, &mut values, &mut stamps, &mut budgets)?
-            {
-                entries.push(Entry {
-                    seq: seq + 1,
-                    node,
-                    op: "@budget".to_string(),
-                    port,
-                    value: Value::Int(left as i64),
-                    kind: Kind::Budget,
-                });
+            continue;
+        };
+        stack[idx].cursor = at + 1;
+        match action {
+            Action::Fire {
+                name,
+                op,
+                slot,
+                out,
+                marks,
+            } => {
+                let f = &mut stack[idx];
+                if trace {
+                    println!("{}{} ({}) -> {}", "  ".repeat(idx), name, op, out);
+                }
                 seq += 1;
+                entries.push(Entry {
+                    seq,
+                    node: name.clone(),
+                    op: op.clone(),
+                    port: slot.1.clone(),
+                    value: out.clone(),
+                    kind: Kind::Fire,
+                });
+                f.values.insert(slot.clone(), out.clone());
+                *f.stamps.entry(slot.clone()).or_insert(0) += 1;
+                f.fired.insert(name.clone(), marks);
+                f.order.push(name);
+                f.fired_in_pass = true;
+                let spent = deliver(
+                    f.g,
+                    &slot,
+                    &out,
+                    &mut f.values,
+                    &mut f.stamps,
+                    &mut f.budgets,
+                )?;
+                for ((node, port), left) in spent {
+                    seq += 1;
+                    entries.push(Entry {
+                        seq,
+                        node,
+                        op: "@budget".to_string(),
+                        port,
+                        value: Value::Int(left as i64),
+                        kind: Kind::Budget,
+                    });
+                }
+                fires += 1;
+                if fires > 1_000_000 {
+                    return Err(
+                        "the run passed 1,000,000 firings; a ring is not terminating".to_string(),
+                    );
+                }
             }
-            fired.insert(node.name.clone(), marks);
-            order.push(node.name.clone());
-            fires += 1;
-            if fires > 1_000_000 {
-                return Err(
-                    "the run passed 1,000,000 firings; a ring is not terminating".to_string(),
-                );
+            Action::Call {
+                name,
+                op,
+                marks,
+                inputs,
+                body,
+            } => {
+                let mut seed_child: BTreeMap<(String, String), Value> = BTreeMap::new();
+                for (node, port) in &body.params {
+                    let v = inputs
+                        .get(port)
+                        .cloned()
+                        .ok_or_else(|| format!("`{op}` is missing its `{port}` argument"))?;
+                    seed_child.insert((node.clone(), port.clone()), v);
+                }
+                {
+                    let f = &mut stack[idx];
+                    f.pending = Some((name.clone(), marks));
+                }
+                if stack.len() > 1000 {
+                    return Err(format!(
+                        "`{op}` went more than 1000 frames deep; the recursion is not terminating"
+                    ));
+                }
+                let caller = (name, body.outs.clone());
+                let child = Frame::new(&body.graph, &seed_child, &BTreeMap::new(), Some(caller));
+                stack.push(child);
             }
-            progress = true;
-        }
-        if !progress {
-            break;
         }
     }
 
-    let skipped: Vec<String> = g
+    let root = stack.pop().expect("the root frame");
+    let skipped: Vec<String> = root
+        .g
         .nodes
         .iter()
-        .filter(|n| !fired.contains_key(&n.name) && !seeded.contains(&n.name))
+        .filter(|n| !root.fired.contains_key(&n.name) && !root.seeded.contains(&n.name))
         .map(|n| n.name.clone())
         .collect();
-
     Ok(Run {
-        values,
-        order,
+        values: root.values,
+        order: root.order,
         skipped,
         entries,
     })

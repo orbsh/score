@@ -8,16 +8,17 @@
 
 use std::collections::BTreeMap;
 
-use crate::ast::{Arg, Attrs, BinOp, Ctor, Edge, Expr, Graph, Guard, Node};
+use crate::ast::{Arg, Attrs, BinOp, Body, Ctor, Edge, Expr, Graph, Guard, Node, Signature};
 use crate::lexer::{Tok, lex};
 use crate::ops;
 use crate::types::known_ty;
 use crate::value::{Ty, Value, accepts, type_of};
 
+/// What a def promises. Its body lives in `Graph.defs`, once, shared by every
+/// call — a call is a node, not an expansion.
 struct Def {
     params: Vec<(String, Ty)>,
     outs: Vec<(String, Ty)>,
-    body: Graph,
 }
 
 pub fn parse(src: &str) -> Result<Graph, String> {
@@ -159,6 +160,17 @@ fn parse_lines(
                     return Err("a `def` cannot be nested".to_string());
                 }
                 let (name, def_params, def_outs) = parse_def_header(&line[1..])?;
+                // The signature goes in before the body is read: a body may
+                // call its own def, and that is the whole point of a call node.
+                defs.defs.insert(
+                    name.clone(),
+                    Def {
+                        params: def_params.clone(),
+                        outs: def_outs.clone(),
+                    },
+                );
+                g.sigs
+                    .insert(name.clone(), (def_params.clone(), def_outs.clone()));
                 let mut j = i + 1;
                 while j < lines.len() && !(lines[j].len() == 1 && lines[j][0] == Tok::RBrace) {
                     j += 1;
@@ -171,14 +183,32 @@ fn parse_lines(
                 if !decorated.is_empty() {
                     defs.attrs.insert(name.clone(), decorated);
                 }
-                defs.defs.insert(
-                    name,
-                    Def {
-                        params: def_params,
-                        outs: def_outs,
-                        body,
-                    },
-                );
+                let outs = def_outs
+                    .iter()
+                    .map(|(o, _)| {
+                        let slot = body
+                            .node(o)
+                            .map(|n| (n.name.clone(), n.out_port.clone()))
+                            .ok_or_else(|| format!("`def {name}` never binds its output `{o}`"))?;
+                        Ok((o.clone(), slot))
+                    })
+                    .collect::<Result<Vec<_>, String>>()?;
+                let mut graph = body;
+                // A body resolves calls by name at run time, so it carries the
+                // signatures and bodies visible where it was written.
+                graph.sigs = g.sigs.clone();
+                graph.defs = g.defs.clone();
+                let body = Body {
+                    params: def_params
+                        .iter()
+                        .map(|(p, _)| (p.clone(), p.clone()))
+                        .collect(),
+                    outs,
+                    graph,
+                };
+                // A call is a node like any other, so its signature has to be
+                // readable while the rest of the program is still being parsed.
+                g.defs.insert(name, body);
                 i = j;
             }
             Tok::LBrace | Tok::RBrace => {
@@ -625,35 +655,87 @@ fn parse_step(
     }
 
     if let Some(def) = defs.defs.get(&op) {
+        let params = def.params.clone();
+        let outs = def.outs.clone();
         // The entry port comes from the port spec, or from the single parameter.
         let entry_port = match &spec_in {
             Some(p) => Some(p.clone()),
-            None if def.params.len() == 1 => Some(def.params[0].0.clone()),
+            None if params.len() == 1 => Some(params[0].0.clone()),
             None => None,
         };
-        let chained = match (&entry_port, entry) {
-            (Some(p), Some(slot)) => {
-                if args.contains_key(p) {
-                    return Err(format!(
-                        "`{op}.{p}` has both an argument and a chained value"
-                    ));
-                }
-                if !def.params.iter().any(|(name, _)| name == p) {
-                    return Err(format!("`{op}` has no input `{p}`"));
-                }
-                Some((p.clone(), slot.clone()))
+        let mut chained: Option<(String, (String, String))> = None;
+        if let (Some(p), Some(slot)) = (&entry_port, entry) {
+            if args.contains_key(p) {
+                return Err(format!(
+                    "`{op}.{p}` has both an argument and a chained value"
+                ));
             }
-            _ => None,
+            if !params.iter().any(|(name, _)| name == p) {
+                return Err(format!("`{op}` has no input `{p}`"));
+            }
+            chained = Some((p.clone(), slot.clone()));
+        }
+        for given in args.keys() {
+            if !params.iter().any(|(n, _)| n == given) {
+                return Err(format!("`{op}` has no input `{given}`"));
+            }
+        }
+        // Argument types are checked here, the same way an operator's are: a
+        // call is a node, so what feeds its ports is decided at this site.
+        let by_name: BTreeMap<&str, &Node> = g.nodes.iter().map(|n| (n.name.as_str(), n)).collect();
+        for (param, want) in &params {
+            let got = match args.get(param) {
+                Some(Arg::Lit(v)) => Some(type_of(v)),
+                Some(Arg::Sub(_)) => Some(Ty::Any),
+                Some(Arg::Ref(r)) => {
+                    let rn = by_name
+                        .get(r.as_str())
+                        .ok_or_else(|| format!("unknown node `{r}`"))?;
+                    Some(known_ty(g, &by_name, rn, 0))
+                }
+                None => None,
+            };
+            if let Some(got) = got
+                && !accepts(want, &got)
+            {
+                return Err(format!(
+                    "`{op}.{param}` wants {}, got {}",
+                    want.name(),
+                    got.name()
+                ));
+            }
+        }
+        let out_port = match spec_out {
+            Some(o) => {
+                if !outs.iter().any(|(name, _)| *name == o) {
+                    return Err(format!("`{op}` has no output `{o}`"));
+                }
+                o
+            }
+            None if outs.len() == 1 => outs[0].0.clone(),
+            None => {
+                let names: Vec<&str> = outs.iter().map(|(o, _)| o.as_str()).collect();
+                return Err(format!(
+                    "`{op}` has several outputs ({}); pick one with `<|name>`",
+                    names.join(", ")
+                ));
+            }
         };
-        let out_port = inline_def(
-            g,
-            def,
-            &op,
-            &name,
-            &args,
-            spec_out.as_deref(),
-            chained.as_ref(),
-        )?;
+        if let Some((port, slot)) = chained {
+            g.edges.push(Edge {
+                from: slot,
+                to: (name.clone(), port),
+                guard: Guard::Always,
+                ring: false,
+                budget: None,
+            });
+        }
+        g.nodes.push(Node {
+            name: name.clone(),
+            op: op.clone(),
+            args,
+            out_port: out_port.clone(),
+        });
         return Ok((
             Step {
                 name,
@@ -730,6 +812,7 @@ fn parse_step(
         };
         let mut arms: BTreeMap<String, Arg> = BTreeMap::new();
         let mut arm_ty: Option<(String, Ty)> = None;
+        let bodies = g.defs.clone();
         for (k, a) in &args {
             if k == "on" {
                 continue;
@@ -757,7 +840,11 @@ fn parse_step(
                 }
                 _ => {}
             }
-            let sub = subgraph_from(def, &format!("{name}.{k}"), &op)?;
+            let body = bodies
+                .get(&target)
+                .ok_or_else(|| format!("`match.{k}`: `{target}` is not a def"))?;
+            let sigs = g.sigs.clone();
+            let sub = subgraph_from(body, &bodies, &sigs, &format!("{name}.{k}"), &op)?;
             arms.insert(k.clone(), Arg::Sub(Box::new(sub)));
         }
         if let Some((_, ty)) = arm_ty {
@@ -788,15 +875,17 @@ fn parse_step(
     };
     if let Some(want) = container_arity {
         let sub = match args.get("f") {
-            Some(Arg::Ref(target)) => match defs.defs.get(target) {
-                Some(def) => {
-                    if def.params.len() != want {
+            Some(Arg::Ref(target)) => match g.defs.clone().get(target) {
+                Some(body) => {
+                    if body.params.len() != want {
                         return Err(format!(
                             "`{op}` wants a def of {want} parameter(s), `{target}` has {}",
-                            def.params.len()
+                            body.params.len()
                         ));
                     }
-                    subgraph_from(def, &name, &op)?
+                    let bodies = g.defs.clone();
+                    let sigs = g.sigs.clone();
+                    subgraph_from(body, &bodies, &sigs, &name, &op)?
                 }
                 None => return Err(format!("`{op}` needs a def as `f`; `{target}` is not one")),
             },
@@ -825,202 +914,6 @@ fn parse_step(
         },
         i,
     ))
-}
-
-/// Inline a subgraph at the call site and return the out port of the node that
-/// carries the result (the node is renamed to the call's binding).
-fn inline_def(
-    g: &mut Graph,
-    def: &Def,
-    op_name: &str,
-    bind: &str,
-    args: &BTreeMap<String, Arg>,
-    spec_out: Option<&str>,
-    chained: Option<&(String, (String, String))>,
-) -> Result<String, String> {
-    let out_name = match spec_out {
-        Some(name) => {
-            if !def.outs.iter().any(|(o, _)| o == name) {
-                return Err(format!("`{op_name}` has no output `{name}`"));
-            }
-            name.to_string()
-        }
-        None if def.outs.len() == 1 => def.outs[0].0.clone(),
-        None => {
-            let names: Vec<&str> = def.outs.iter().map(|(o, _)| o.as_str()).collect();
-            return Err(format!(
-                "`{op_name}` has several outputs ({}); pick one with `<|name>`",
-                names.join(", ")
-            ));
-        }
-    };
-
-    for (p, ty) in &def.params {
-        if let Some((name, slot)) = chained
-            && name == p
-        {
-            let sn = g
-                .node(&slot.0)
-                .ok_or_else(|| format!("unknown node `{}`", slot.0))?;
-            let by_name: BTreeMap<&str, &Node> =
-                g.nodes.iter().map(|n| (n.name.as_str(), n)).collect();
-            let got = known_ty(g, &by_name, sn, 0);
-            if !accepts(ty, &got) {
-                return Err(format!(
-                    "`{op_name}.{p}` wants {}, got {}",
-                    ty.name(),
-                    got.name()
-                ));
-            }
-            continue;
-        }
-        let arg = args
-            .get(p)
-            .ok_or_else(|| format!("`{op_name}` needs `{p}: {}`", ty.name()))?;
-        let got = match arg {
-            Arg::Lit(v) => type_of(v),
-            Arg::Sub(_) => Ty::Any,
-            Arg::Ref(r) => {
-                let rn = g.node(r).ok_or_else(|| format!("unknown node `{r}`"))?;
-                let by_name: BTreeMap<&str, &Node> =
-                    g.nodes.iter().map(|n| (n.name.as_str(), n)).collect();
-                known_ty(g, &by_name, rn, 0)
-            }
-        };
-        if !accepts(ty, &got) {
-            return Err(format!(
-                "`{op_name}.{p}` wants {}, got {}",
-                ty.name(),
-                got.name()
-            ));
-        }
-    }
-    for p in args.keys() {
-        if !def.params.iter().any(|(name, _)| name == p) {
-            return Err(format!("`{op_name}` has no input `{p}`"));
-        }
-    }
-
-    let mut rename: BTreeMap<String, String> = BTreeMap::new();
-    for n in &def.body.nodes {
-        let new_name = if n.name == out_name {
-            bind.to_string()
-        } else {
-            format!("{bind}/{}", n.name)
-        };
-        rename.insert(n.name.clone(), new_name);
-    }
-    // A body may hold nodes whose type is recorded rather than declared — a
-    // `match`, for one — and the rename has to reach those entries too.
-    for (name, ty) in &def.body.node_tys {
-        if let Some(new_name) = rename.get(name) {
-            g.node_tys.insert(new_name.clone(), ty.clone());
-        }
-    }
-
-    // Param sources: a literal becomes a lit node, a reference or the chained
-    // slot is wired directly.
-    let mut resolved: BTreeMap<String, (String, String)> = BTreeMap::new();
-    for (p, _) in &def.params {
-        if let Some((name, slot)) = chained
-            && name == p
-        {
-            resolved.insert(p.clone(), slot.clone());
-            continue;
-        }
-        match args.get(p) {
-            Some(Arg::Ref(r)) => {
-                let rn = g.node(r).ok_or_else(|| format!("unknown node `{r}`"))?;
-                resolved.insert(p.clone(), (r.clone(), rn.out_port.clone()));
-            }
-            _ => {
-                resolved.insert(p.clone(), (rename[p].clone(), "out".to_string()));
-            }
-        }
-    }
-
-    for n in &def.body.nodes {
-        if n.op == "param" {
-            if let Some((name, _)) = chained
-                && *name == n.name
-            {
-                continue;
-            }
-            match args.get(&n.name) {
-                Some(Arg::Ref(_)) => continue,
-                _ => {
-                    let mut args2 = BTreeMap::new();
-                    args2.insert(
-                        "value".to_string(),
-                        args.get(&n.name).cloned().unwrap_or(Arg::Lit(Value::Unit)),
-                    );
-                    g.nodes.push(Node {
-                        name: rename[&n.name].clone(),
-                        op: "lit".to_string(),
-                        args: args2,
-                        out_port: "out".to_string(),
-                    });
-                }
-            }
-            continue;
-        }
-        let mut args2 = BTreeMap::new();
-        for (port, arg) in &n.args {
-            let arg2 = match arg {
-                Arg::Lit(v) => Arg::Lit(v.clone()),
-                Arg::Sub(sub) => Arg::Sub(sub.clone()),
-                Arg::Ref(r) => match resolved.get(r) {
-                    Some((node, _)) => Arg::Ref(node.clone()),
-                    None => Arg::Ref(
-                        rename
-                            .get(r)
-                            .cloned()
-                            .ok_or_else(|| format!("`{r}` is not a node of `{op_name}`"))?,
-                    ),
-                },
-            };
-            args2.insert(port.clone(), arg2);
-        }
-        g.nodes.push(Node {
-            name: rename[&n.name].clone(),
-            op: n.op.clone(),
-            args: args2,
-            out_port: n.out_port.clone(),
-        });
-    }
-
-    for e in &def.body.edges {
-        let from = match resolved.get(&e.from.0) {
-            Some(pair) => pair.clone(),
-            None => (
-                rename
-                    .get(&e.from.0)
-                    .cloned()
-                    .ok_or_else(|| format!("`{}` is not a node of `{op_name}`", e.from.0))?,
-                e.from.1.clone(),
-            ),
-        };
-        let to = (
-            rename
-                .get(&e.to.0)
-                .cloned()
-                .ok_or_else(|| format!("`{}` is not a node of `{op_name}`", e.to.0))?,
-            e.to.1.clone(),
-        );
-        g.edges.push(Edge {
-            from,
-            to,
-            guard: e.guard.clone(),
-            ring: e.ring,
-            budget: e.budget,
-        });
-    }
-
-    let out_node = def
-        .body
-        .node(&out_name)
-        .ok_or_else(|| format!("`{op_name}` never binds its output `{out_name}`"))?;
-    Ok(out_node.out_port.clone())
 }
 
 fn parse_fields(toks: &[Tok]) -> Result<Vec<(String, Ty)>, String> {
@@ -1092,13 +985,19 @@ fn check_fields(
     Ok(())
 }
 
-fn subgraph_from(def: &Def, prefix: &str, op: &str) -> Result<crate::ast::SubGraph, String> {
-    if def.outs.len() != 1 {
+fn subgraph_from(
+    body: &Body,
+    bodies: &BTreeMap<String, Body>,
+    sigs: &BTreeMap<String, Signature>,
+    prefix: &str,
+    op: &str,
+) -> Result<crate::ast::SubGraph, String> {
+    if body.outs.len() != 1 {
         return Err(format!("`{op}` wants a def with exactly one output"));
     }
-    let out_name = def.outs[0].0.clone();
+    let out_name = body.outs[0].0.clone();
     let mut rename: BTreeMap<String, String> = BTreeMap::new();
-    for n in &def.body.nodes {
+    for n in &body.graph.nodes {
         // Parameters keep their names: the runtime seeds them by name, and a
         // `match` arm takes the payload field of the same name.
         let renamed = if n.op == "param" {
@@ -1108,13 +1007,19 @@ fn subgraph_from(def: &Def, prefix: &str, op: &str) -> Result<crate::ast::SubGra
         };
         rename.insert(n.name.clone(), renamed);
     }
-    let mut g = Graph::default();
-    for (name, ty) in &def.body.node_tys {
+    // A body may call another def, so the copy carries the same bodies and the
+    // signatures that name them.
+    let mut g = Graph {
+        defs: bodies.clone(),
+        sigs: sigs.clone(),
+        ..Graph::default()
+    };
+    for (name, ty) in &body.graph.node_tys {
         if let Some(new_name) = rename.get(name) {
             g.node_tys.insert(new_name.clone(), ty.clone());
         }
     }
-    for n in &def.body.nodes {
+    for n in &body.graph.nodes {
         let mut args = BTreeMap::new();
         for (port, arg) in &n.args {
             let arg = match arg {
@@ -1136,7 +1041,7 @@ fn subgraph_from(def: &Def, prefix: &str, op: &str) -> Result<crate::ast::SubGra
             out_port: n.out_port.clone(),
         });
     }
-    for e in &def.body.edges {
+    for e in &body.graph.edges {
         g.edges.push(Edge {
             from: (rename[&e.from.0].clone(), e.from.1.clone()),
             to: (rename[&e.to.0].clone(), e.to.1.clone()),
@@ -1153,10 +1058,10 @@ fn subgraph_from(def: &Def, prefix: &str, op: &str) -> Result<crate::ast::SubGra
         .clone();
     Ok(crate::ast::SubGraph {
         graph: g,
-        inputs: def
+        inputs: body
             .params
             .iter()
-            .map(|(p, _)| (rename[p].clone(), p.clone()))
+            .map(|(node, port)| (rename[node].clone(), port.clone()))
             .collect(),
         output: (rename[&out_name].clone(), out_port),
     })

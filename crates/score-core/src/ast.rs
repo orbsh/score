@@ -22,6 +22,18 @@ pub struct SubGraph {
     pub output: (String, String),
 }
 
+/// A def's body, kept once and run at every call. `SubGraph` is a template
+/// cloned per call site (a container's element body); this one is shared,
+/// because a call is not an expansion: recursion runs the same body again.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Body {
+    pub graph: Graph,
+    /// Argument nodes in the def's declared parameter order: (node, port).
+    pub params: Vec<(String, String)>,
+    /// Result nodes by declared output name: (name, (node, port)).
+    pub outs: Vec<(String, (String, String))>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinOp {
     Add,
@@ -109,6 +121,9 @@ pub struct Graph {
     /// Output types for nodes that have no static operator signature — `match`
     /// today: its arms agree on a type, so the node carries that type.
     pub node_tys: BTreeMap<String, Ty>,
+    /// The body behind each `def` name. A call is a node like any other; its
+    /// `op` is the def name, and the runtime finds the body here.
+    pub defs: BTreeMap<String, Body>,
 }
 
 impl Graph {
@@ -168,6 +183,23 @@ impl Graph {
             for (f, t) in fields {
                 field(&mut h, f);
                 field(&mut h, &t.name());
+            }
+        }
+        // A def body is part of the program, not a detail of how it was
+        // written: changing a body has to change the fingerprint, or a journal
+        // from the old program would be resumed against the new one.
+        for (name, body) in &self.defs {
+            field(&mut h, "f");
+            field(&mut h, name);
+            field(&mut h, &format!("{:x}", body.graph.fingerprint()));
+            for (node, port) in &body.params {
+                field(&mut h, node);
+                field(&mut h, port);
+            }
+            for (out, (node, port)) in &body.outs {
+                field(&mut h, out);
+                field(&mut h, node);
+                field(&mut h, port);
             }
         }
         h
