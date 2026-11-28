@@ -21,9 +21,9 @@ A ring's progress is not derivable from its firings, so a back edge writes a `ki
 
 `graph` prints the parsed graph back as text: the declarations, then every node with its ports and arguments, then every edge with its guard and budget — what validation sees, after `def` calls have been inlined.
 
-Implemented today: the v0 surface (bindings, `<in|out>` ports, `->` / `-->` / `-[cond]->`, `const`, `def` with inlining), validation (ports, types, one edge per input, a `[*]` arm for every conditional branch, no ring without a budget), list and record values, and a worklist runtime with twenty in-process operators (`lit`, `add`, `concat`, `upper`, `len`, `print`, `range`, `count`, `sum`, `join`, `at`, `map`, `fold`, `filter`, `any`, `all`, `gt`, `eq`, `record`, `get`).
+Implemented today: the v0 surface (bindings, `<in|out>` ports, `->` / `-->` / `-[cond]->`, `const`, `def` with inlining), validation (ports, types, one edge per input, a `[*]` arm for every conditional branch, no ring without a budget), list and record values, and a worklist runtime with twenty-two in-process operators (`lit`, `add`, `concat`, `upper`, `len`, `print`, `range`, `count`, `sum`, `join`, `at`, `map`, `fold`, `filter`, `any`, `all`, `gt`, `eq`, `record`, `get`, `tag`), plus `match` for sums over def bodies.
 
-A record is built from its arguments (`r = record(name: "ada", age: 36)`) and read with `get`; its fields are its arguments, so `record` declares no input ports of its own.
+A record is built from its arguments (`r = record(name: "ada", age: 36)`) and read with `get`; its fields are its arguments, so `record` declares no input ports of its own. `get` also reads a tagged value's field, and `tag` returns its variant name — the unchecked way to look inside a sum, next to `match`.
 
 Types are declared with braces, like the rest of the language: `enum Shape { Circle { r: Int } Rect { w: Int, h: Int } }` and `struct Person { name: Text, age: Int }`. A variant name is also the port its value leaves on, so `c = Circle(r: 3)` is read at `c`'s `Circle` port; a struct name is its own constructor and yields a record.
 

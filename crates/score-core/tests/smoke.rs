@@ -47,6 +47,21 @@ fn newlines_are_layout() {
 }
 
 #[test]
+fn a_variant_reports_its_tag_and_fields() {
+    let src = "enum Shape {\n  Circle { r: Int }\n  Rect { w: Int, h: Int }\n}\ns = Circle(r: 7)\nt = tag(v: s)\nr = get(r: s, key: \"r\")\nt -> print\nr -> print\n";
+    let g = build(src);
+    let run = exec::run(&g, false).expect("run");
+    assert_eq!(
+        run.values.get(&("t".to_string(), "out".to_string())),
+        Some(&Value::Text("Circle".to_string()))
+    );
+    assert_eq!(
+        run.values.get(&("r".to_string(), "out".to_string())),
+        Some(&Value::Int(7))
+    );
+}
+
+#[test]
 fn match_dispatches_on_the_tag() {
     let g = build(include_str!("../../../examples/match.score"));
     let run = exec::run(&g, false).expect("run");

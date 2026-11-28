@@ -96,6 +96,11 @@ static GET: Sig = Sig {
     ins: &[("r", Ty::Any), ("key", Ty::Text)],
     outs: &[("out", Ty::Any)],
 };
+/// The variant name of a tagged value.
+static TAG: Sig = Sig {
+    ins: &[("v", Ty::Any)],
+    outs: &[("out", Ty::Text)],
+};
 
 /// An operator that takes its arguments as fields rather than as named ports.
 pub fn is_variadic(op: &str) -> bool {
@@ -125,6 +130,7 @@ pub fn signature(op: &str) -> Option<&'static Sig> {
         "eq" => Some(&EQ),
         "record" => Some(&RECORD),
         "get" => Some(&GET),
+        "tag" => Some(&TAG),
         _ => None,
     }
 }
@@ -250,7 +256,7 @@ pub fn apply(op: &str, args: &BTreeMap<&str, Value>) -> Result<Value, String> {
             let k = get("key")?;
             let key = as_text(op, "key", &k)?;
             match &r {
-                Value::Record(fields) => fields
+                Value::Record(fields) | Value::Variant { fields, .. } => fields
                     .get(key)
                     .cloned()
                     .ok_or_else(|| format!("`get`: the record has no field `{key}`")),
@@ -264,6 +270,16 @@ pub fn apply(op: &str, args: &BTreeMap<&str, Value>) -> Result<Value, String> {
             "`{op}` runs a def per element and is driven by the runtime, not by `apply`"
         )),
         "param" => Err("a parameter is seeded by the runtime, it never fires".to_string()),
+        "tag" => {
+            let v = get("v")?;
+            match &v {
+                Value::Variant { tag, .. } => Ok(Value::Text(tag.clone())),
+                other => Err(format!(
+                    "`tag` wants a variant, got {}",
+                    type_of(other).name()
+                )),
+            }
+        }
         other => Err(format!("unknown operator `{other}`")),
     }
 }

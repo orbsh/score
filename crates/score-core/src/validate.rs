@@ -71,9 +71,7 @@ pub fn validate(g: &Graph) -> Result<(), String> {
                         .ok_or_else(|| format!("unknown node `{r}`"))?;
                     if rn.op == "param" {
                         Ty::Any
-                    } else {
-                        let rsig = ops::signature(&rn.op)
-                            .ok_or_else(|| format!("unknown operator `{}`", rn.op))?;
+                    } else if let Some(rsig) = ops::signature(&rn.op) {
                         rsig.outs
                             .iter()
                             .find(|(p, _)| *p == rn.out_port)
@@ -81,6 +79,10 @@ pub fn validate(g: &Graph) -> Result<(), String> {
                             .ok_or_else(|| {
                                 format!("`{}` has no output port `{}`", rn.op, rn.out_port)
                             })?
+                    } else {
+                        // Constructors and `match` carry no static signature;
+                        // their values were checked where they were built.
+                        Ty::Any
                     }
                 }
             };
