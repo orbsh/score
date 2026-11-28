@@ -47,6 +47,28 @@ fn newlines_are_layout() {
 }
 
 #[test]
+fn match_dispatches_on_the_tag() {
+    let g = build(include_str!("../../../examples/match.score"));
+    let run = exec::run(&g, false).expect("run");
+    assert_eq!(
+        run.values.get(&("m".to_string(), "out".to_string())),
+        Some(&Value::Text("a circle".to_string()))
+    );
+    assert_eq!(
+        run.values.get(&("n".to_string(), "out".to_string())),
+        Some(&Value::Text("a rect".to_string()))
+    );
+}
+
+#[test]
+fn match_must_cover_every_variant() {
+    let src = "enum Shape {\n  Circle { r: Int }\n  Rect { w: Int, h: Int }\n}\ndef a(r: Int) -> (out: Int) {\n  out = lit(value: 1)\n}\ns = Circle(r: 1)\nm = match(on: s, Circle: a)\n";
+    let g = parser::parse(src).expect("parse");
+    let e = validate::validate(&g).expect_err("validate");
+    assert!(e.contains("leaves out Rect"), "{e}");
+}
+
+#[test]
 fn a_declared_type_can_name_a_port() {
     let src = "enum Shape {\n  Circle { r: Int }\n}\n\ndef f(s: Shape) -> (out: Text) {\n  out = lit(value: \"ok\")\n}\n";
     let g = build(src);

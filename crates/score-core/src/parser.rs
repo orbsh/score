@@ -718,6 +718,46 @@ fn parse_step(
         ));
     }
 
+    if op == "match" {
+        let on = match args.get("on") {
+            Some(a @ (Arg::Ref(_) | Arg::Lit(_))) => a.clone(),
+            Some(Arg::Sub(_)) => return Err("`match.on` takes a value, not a def".to_string()),
+            None => return Err("`match` needs `on:`".to_string()),
+        };
+        let mut arms: BTreeMap<String, Arg> = BTreeMap::new();
+        for (k, a) in &args {
+            if k == "on" {
+                continue;
+            }
+            let target = match a {
+                Arg::Ref(r) => r.clone(),
+                _ => return Err(format!("`match.{k}` wants a def name")),
+            };
+            let def = defs
+                .defs
+                .get(&target)
+                .ok_or_else(|| format!("`match.{k}`: `{target}` is not a def"))?;
+            let sub = subgraph_from(def, &format!("{name}.{k}"), &op)?;
+            arms.insert(k.clone(), Arg::Sub(Box::new(sub)));
+        }
+        arms.insert("on".to_string(), on);
+        g.nodes.push(Node {
+            name: name.clone(),
+            op: op.clone(),
+            args: arms,
+            out_port: "out".to_string(),
+        });
+        return Ok((
+            Step {
+                name,
+                out_port: "out".to_string(),
+                in_port: None,
+                inlined: false,
+            },
+            i,
+        ));
+    }
+
     let container_arity = match op.as_str() {
         "map" | "filter" | "any" | "all" => Some(1),
         "fold" => Some(2),
@@ -1042,7 +1082,14 @@ fn subgraph_from(def: &Def, prefix: &str, op: &str) -> Result<crate::ast::SubGra
     let out_name = def.outs[0].0.clone();
     let mut rename: BTreeMap<String, String> = BTreeMap::new();
     for n in &def.body.nodes {
-        rename.insert(n.name.clone(), format!("{prefix}/{}", n.name));
+        // Parameters keep their names: the runtime seeds them by name, and a
+        // `match` arm takes the payload field of the same name.
+        let renamed = if n.op == "param" {
+            n.name.clone()
+        } else {
+            format!("{prefix}/{}", n.name)
+        };
+        rename.insert(n.name.clone(), renamed);
     }
 
     let mut g = Graph::default();

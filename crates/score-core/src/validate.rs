@@ -36,6 +36,10 @@ pub fn validate(g: &Graph) -> Result<(), String> {
             // A constructor's arguments were checked by the parser.
             continue;
         }
+        if n.op == "match" {
+            check_match(g, n, &by_name)?;
+            continue;
+        }
         let sig = ops::signature(&n.op).ok_or_else(|| format!("unknown operator `{}`", n.op))?;
         if !sig.outs.iter().any(|(p, _)| *p == n.out_port) && n.op != "param" {
             return Err(format!("`{}` has no output port `{}`", n.op, n.out_port));
@@ -99,8 +103,8 @@ pub fn validate(g: &Graph) -> Result<(), String> {
         let tn = by_name
             .get(e.to.0.as_str())
             .ok_or_else(|| format!("edge to unknown node `{}`", e.to.0))?;
-        let tsig = ops::signature(&tn.op).ok_or_else(|| format!("unknown operator `{}`", tn.op))?;
-        let sty = if sn.op == "param" {
+        let tsig = ops::signature(&tn.op);
+        let sty = if sn.op == "param" || sn.op == "match" {
             &Ty::Any
         } else if g.ctors.contains_key(&sn.op) {
             if e.from.1 != sn.op {
@@ -130,11 +134,19 @@ pub fn validate(g: &Graph) -> Result<(), String> {
                 tn.op
             ));
         }
-        let (_, tty) = tsig
-            .ins
-            .iter()
-            .find(|(p, _)| *p == e.to.1)
-            .ok_or_else(|| format!("`{}` has no input port `{}`", tn.op, e.to.1))?;
+        let tty = if tn.op == "match" {
+            if e.to.1 != "on" {
+                return Err(format!("`{}` only takes `on`", tn.name));
+            }
+            &Ty::Any
+        } else {
+            let tsig = tsig.ok_or_else(|| format!("unknown operator `{}`", tn.op))?;
+            tsig.ins
+                .iter()
+                .find(|(p, _)| *p == e.to.1)
+                .map(|(_, t)| t)
+                .ok_or_else(|| format!("`{}` has no input port `{}`", tn.op, e.to.1))?
+        };
         if !accepts(tty, sty) {
             return Err(format!(
                 "edge `{}.{}` -> `{}.{}` feeds {} into {}",
@@ -163,7 +175,7 @@ pub fn validate(g: &Graph) -> Result<(), String> {
     }
 
     for n in &g.nodes {
-        if g.ctors.contains_key(&n.op) || g.structs.contains_key(&n.op) {
+        if g.ctors.contains_key(&n.op) || g.structs.contains_key(&n.op) || n.op == "match" {
             continue;
         }
         let sig = ops::signature(&n.op).ok_or_else(|| format!("unknown operator `{}`", n.op))?;
@@ -224,6 +236,69 @@ fn reaches(g: &Graph, from: &str, to: &str) -> bool {
         }
     }
     false
+}
+
+/// `match` must name every variant of the sum its `on` value carries — that is
+/// the part of a sum type worth checking, and it needs no inference: the value
+/// comes from a constructor, which names its own sum.
+fn check_match(g: &Graph, n: &Node, by_name: &BTreeMap<&str, &Node>) -> Result<(), String> {
+    let on = n
+        .args
+        .get("on")
+        .ok_or_else(|| format!("`{}` needs `on:`", n.name))?;
+    let src = match on {
+        Arg::Ref(r) => by_name
+            .get(r.as_str())
+            .ok_or_else(|| format!("`{}.on` names unknown node `{r}`", n.name))?,
+        Arg::Lit(_) => return Err(format!("`{}.on` must be a node, not a literal", n.name)),
+        Arg::Sub(_) => return Err(format!("`{}.on` must be a value", n.name)),
+    };
+    let ctor = g.ctors.get(&src.op).ok_or_else(|| {
+        format!(
+            "`{}.on` wants a variant, but `{}` is `{}`",
+            n.name, src.name, src.op
+        )
+    })?;
+    let sum = ctor.sum.clone();
+    let mut have: BTreeSet<&str> = BTreeSet::new();
+    for (k, a) in &n.args {
+        if k == "on" {
+            continue;
+        }
+        let Some(arm) = g.ctors.get(k).filter(|c| c.sum == sum) else {
+            return Err(format!(
+                "`{}` has an arm `{k}`, which is not a variant of `{sum}`",
+                n.name
+            ));
+        };
+        if let Arg::Sub(sub) = a {
+            let params: Vec<&str> = sub.inputs.iter().map(|(p, _)| p.as_str()).collect();
+            let fields: Vec<&str> = arm.fields.iter().map(|(f, _)| f.as_str()).collect();
+            if params != fields {
+                return Err(format!(
+                    "`{}.{k}` takes ({}) but `{k}` carries ({})",
+                    n.name,
+                    params.join(", "),
+                    fields.join(", ")
+                ));
+            }
+        }
+        have.insert(k.as_str());
+    }
+    let missing: Vec<&str> = g
+        .ctors
+        .iter()
+        .filter(|(tag, c)| c.sum == sum && !have.contains(tag.as_str()))
+        .map(|(tag, _)| tag.as_str())
+        .collect();
+    if !missing.is_empty() {
+        return Err(format!(
+            "`{}` on `{sum}` leaves out {}",
+            n.name,
+            missing.join(", ")
+        ));
+    }
+    Ok(())
 }
 
 fn check_named(g: &Graph, ty: &Ty, what: &str) -> Result<(), String> {

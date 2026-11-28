@@ -106,7 +106,10 @@ pub fn run_from(
                 continue;
             }
             let sig = ops::signature(&node.op);
-            if sig.is_none() && !g.ctors.contains_key(&node.op) && !g.structs.contains_key(&node.op)
+            if sig.is_none()
+                && !g.ctors.contains_key(&node.op)
+                && !g.structs.contains_key(&node.op)
+                && node.op != "match"
             {
                 return Err(format!("unknown operator `{}`", node.op));
             }
@@ -161,7 +164,9 @@ pub fn run_from(
             if !ready || fired.get(&node.name) == Some(&marks) {
                 continue;
             }
-            let out = if !subs.is_empty() {
+            let out = if !subs.is_empty() && node.op == "match" {
+                run_match(&subs, &inputs)?
+            } else if !subs.is_empty() {
                 run_container(&node.op, &subs, &inputs)?
             } else if g.ctors.contains_key(&node.op) {
                 Value::Variant {
@@ -240,6 +245,42 @@ pub fn run_from(
         skipped,
         entries,
     })
+}
+
+/// `match` runs the arm named after the value's tag, seeding the arm's
+/// parameters from the payload fields of the same name.
+fn run_match(
+    subs: &BTreeMap<&str, &SubGraph>,
+    inputs: &BTreeMap<&str, Value>,
+) -> Result<Value, String> {
+    let v = inputs
+        .get("on")
+        .ok_or_else(|| "`match` has no `on` value".to_string())?;
+    let (tag, fields) = match v {
+        Value::Variant { tag, fields } => (tag, fields),
+        other => {
+            return Err(format!(
+                "`match` wants a variant, got {}",
+                type_of(other).name()
+            ));
+        }
+    };
+    let sub = subs
+        .get(tag.as_str())
+        .ok_or_else(|| format!("`match` has no arm for `{tag}`"))?;
+    let mut seed = BTreeMap::new();
+    for (param, port) in &sub.inputs {
+        let v = fields
+            .get(param)
+            .cloned()
+            .ok_or_else(|| format!("`match.{tag}` wants the field `{param}`"))?;
+        seed.insert((param.clone(), port.clone()), v);
+    }
+    let run = run_from(&sub.graph, false, &seed, &BTreeMap::new(), 0)?;
+    run.values
+        .get(&sub.output)
+        .cloned()
+        .ok_or_else(|| format!("`match.{tag}`: the arm produced no `{}`", sub.output.0))
 }
 
 fn run_container(

@@ -1,0 +1,20 @@
+# match 按变体名选臂；臂的形参与载荷字段同名
+enum Shape {
+  Circle { r: Int }
+  Rect { w: Int, h: Int }
+}
+
+def circle(r: Int) -> (out: Text) {
+  out = lit(value: "a circle")
+}
+
+def rect(w: Int, h: Int) -> (out: Text) {
+  out = lit(value: "a rect")
+}
+
+s = Circle(r: 3)
+t = Rect(w: 2, h: 5)
+m = match(on: s, Circle: circle, Rect: rect)
+n = match(on: t, Circle: circle, Rect: rect)
+m -> print
+n -> print

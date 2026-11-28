@@ -57,7 +57,8 @@
 - `List` 没有元素类型参数：`List` 表示任意列表，`List<Row>` 还不存在；`map` / `fold` 已能对 def 逐元素求值，但不能捕获外层值（body 只看得见自己的参数）。
 - `Record` 是一个值，但没有字段类型：`record(name: "ada")` 的字段就是它的实参，取字段只能用 `get`，没有 `r.name` 语法糖。
 - `Ty` 是 `Int` / `Text` / `Bool` / `Unit` / `List` / `Record` / `Any` 加 `Named`：端口上可以写 `enum` / `struct` 声明的类型名，未声明的名字被 validate 拒绝。`List` / `Record` 仍不带成员类型（`List<Row>` 不存在）。
-- 和类型还没有穷尽性检查（每个臂接线或显式忽略）：端口能说「这是 Shape」，但 validate 不会枚举 Shape 的臂。
+- 和类型由 `match(on: s, Circle: f, Rect: g)` 消费：臂的形参必须就是变体的字段（同名同序），每个变体都要有臂，少一个 validate 就拒；被 match 的值必须来自构造器（直接或经 def 内联），validate 由它得知该和类型有哪些臂。
+- 和类型还没有穷尽性以外的东西：没有 `[*]` 兜底臂、没有「臂与臂的结果类型统一」（match 的输出是 Any），`match` 也不接受类型为 `Any` 的值。
 - 属性只有 `@doc` / `@tag` 两个，且没有消费方（不进指纹、不影响运行）；自定义装饰器还没有注册机制。
 - 属性目前能落的位置是声明（`def` / `enum` / `struct`）和一行里的第一个节点；字段上的属性还没有（字段没有消费方之前不加）。
 - okm 查询层只是想法，先不做。
