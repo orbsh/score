@@ -64,6 +64,7 @@ fn main() -> ExitCode {
         }
         "run" => {
             let mut seed: BTreeMap<(String, String), Value> = BTreeMap::new();
+            let mut budgets: BTreeMap<(String, String), u32> = BTreeMap::new();
             let mut done: Vec<exec::Entry> = Vec::new();
             let mut seq_base = 0usize;
             if let Some(path) = &resume {
@@ -92,6 +93,13 @@ fn main() -> ExitCode {
                 }
                 let entries = loaded.entries;
                 for e in &entries {
+                    if e.kind == exec::Kind::Budget {
+                        if let Value::Int(left) = e.value {
+                            budgets.insert((e.node.clone(), e.port.clone()), left.max(0) as u32);
+                        }
+                        seq_base = seq_base.max(e.seq);
+                        continue;
+                    }
                     match graph.node(&e.node) {
                         Some(n) if n.op == e.op => {}
                         Some(n) => {
@@ -116,7 +124,7 @@ fn main() -> ExitCode {
                 done = entries;
             }
 
-            let run = match exec::run_from(&graph, trace, &seed, seq_base) {
+            let run = match exec::run_from(&graph, trace, &seed, &budgets, seq_base) {
                 Ok(r) => r,
                 Err(e) => {
                     eprintln!("run failed: {e}");

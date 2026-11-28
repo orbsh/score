@@ -7,10 +7,14 @@ use crate::exec::Entry;
 use crate::value::{Value, json_string};
 
 pub fn write(graph: u64, entries: &[Entry]) -> String {
-    let mut out = format!("{{\"version\":1,\"graph\":\"{graph:016x}\"}}\n");
+    let mut out = format!("{{\"version\":2,\"graph\":\"{graph:016x}\"}}\n");
     for e in entries {
+        let kind = match e.kind {
+            crate::exec::Kind::Fire => "fire",
+            crate::exec::Kind::Budget => "budget",
+        };
         out.push_str(&format!(
-            "{{\"seq\":{},\"node\":{},\"op\":{},\"port\":{},\"value\":{}}}\n",
+            "{{\"seq\":{},\"kind\":\"{kind}\",\"node\":{},\"op\":{},\"port\":{},\"value\":{}}}\n",
             e.seq,
             json_string(&e.node),
             json_string(&e.op),
@@ -65,12 +69,19 @@ pub fn read(src: &str) -> Result<Journal, String> {
             Some(j) => to_value(j).ok_or_else(|| format!("line {}: bad value", n + 1))?,
             None => return Err(format!("line {}: missing `value`", n + 1)),
         };
+        let kind = match obj.get("kind") {
+            Some(Json::Str(k)) if k == "budget" => crate::exec::Kind::Budget,
+            Some(Json::Str(k)) if k == "fire" => crate::exec::Kind::Fire,
+            None => crate::exec::Kind::Fire,
+            Some(_) => return Err(format!("line {}: bad `kind`", n + 1)),
+        };
         entries.push(Entry {
             seq,
             node,
             op,
             port,
             value,
+            kind,
         });
     }
     Ok(Journal { graph, entries })

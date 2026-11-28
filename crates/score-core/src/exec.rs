@@ -23,10 +23,20 @@ pub struct Entry {
     pub op: String,
     pub port: String,
     pub value: Value,
+    pub kind: Kind,
+}
+
+/// A journal line is either a firing or the budget left on a back edge. The
+/// second kind exists because a ring's progress is not derivable from the
+/// firings: resuming without it would hand the ring its budget twice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    Fire,
+    Budget,
 }
 
 pub fn run(g: &Graph, trace: bool) -> Result<Run, String> {
-    run_from(g, trace, &BTreeMap::new(), 0)
+    run_from(g, trace, &BTreeMap::new(), &BTreeMap::new(), 0)
 }
 
 /// Resume: values already in the journal seed the run, and their edges are
@@ -35,6 +45,7 @@ pub fn run_from(
     g: &Graph,
     trace: bool,
     seed: &BTreeMap<(String, String), Value>,
+    budgets_seed: &BTreeMap<(String, String), u32>,
     seq_base: usize,
 ) -> Result<Run, String> {
     let mut values: BTreeMap<(String, String), Value> = seed.clone();
@@ -45,7 +56,13 @@ pub fn run_from(
     let mut budgets: Vec<Option<u32>> = g
         .edges
         .iter()
-        .map(|e| if e.ring { e.budget } else { None })
+        .map(|e| {
+            if e.ring {
+                budgets_seed.get(&e.to).copied().or(e.budget)
+            } else {
+                None
+            }
+        })
         .collect();
     let mut seeded: BTreeSet<String> = BTreeSet::new();
     for (node, port) in seed.keys() {
@@ -60,16 +77,26 @@ pub fn run_from(
         }
         seeded.insert(node.clone());
     }
+    let mut entries: Vec<Entry> = Vec::new();
+    let mut seq = seq_base;
     for (slot, v) in seed {
-        deliver(g, slot, v, &mut values, &mut stamps, &mut budgets)?;
+        for ((node, port), left) in deliver(g, slot, v, &mut values, &mut stamps, &mut budgets)? {
+            entries.push(Entry {
+                seq: seq + 1,
+                node,
+                op: "@budget".to_string(),
+                port,
+                value: Value::Int(left as i64),
+                kind: Kind::Budget,
+            });
+            seq += 1;
+        }
     }
 
     // The stamps each node's inputs carried at its last firing: a node fires
     // again only when one of them moved, which is what turns a ring.
     let mut fired: BTreeMap<String, Vec<u64>> = BTreeMap::new();
     let mut order: Vec<String> = Vec::new();
-    let mut entries: Vec<Entry> = Vec::new();
-    let mut seq = seq_base;
     let mut fires = 0usize;
 
     loop {
@@ -163,6 +190,7 @@ pub fn run_from(
                 op: node.op.clone(),
                 port: node.out_port.clone(),
                 value: out.clone(),
+                kind: Kind::Fire,
             });
             seq += 1;
             let slot = match &out {
@@ -171,7 +199,19 @@ pub fn run_from(
             };
             values.insert(slot.clone(), out.clone());
             *stamps.entry(slot.clone()).or_insert(0) += 1;
-            deliver(g, &slot, &out, &mut values, &mut stamps, &mut budgets)?;
+            for ((node, port), left) in
+                deliver(g, &slot, &out, &mut values, &mut stamps, &mut budgets)?
+            {
+                entries.push(Entry {
+                    seq: seq + 1,
+                    node,
+                    op: "@budget".to_string(),
+                    port,
+                    value: Value::Int(left as i64),
+                    kind: Kind::Budget,
+                });
+                seq += 1;
+            }
             fired.insert(node.name.clone(), marks);
             order.push(node.name.clone());
             fires += 1;
@@ -220,7 +260,7 @@ fn run_container(
             for item in xs {
                 let mut seed = BTreeMap::new();
                 seed.insert(sub.inputs[0].clone(), item.clone());
-                let run = run_from(&sub.graph, false, &seed, 0)?;
+                let run = run_from(&sub.graph, false, &seed, &BTreeMap::new(), 0)?;
                 out.push(
                     run.values.get(&sub.output).cloned().ok_or_else(|| {
                         format!("`{op}`: the body produced no `{}`", sub.output.0)
@@ -238,7 +278,7 @@ fn run_container(
                 let mut seed = BTreeMap::new();
                 seed.insert(sub.inputs[0].clone(), acc.clone());
                 seed.insert(sub.inputs[1].clone(), item.clone());
-                let run = run_from(&sub.graph, false, &seed, 0)?;
+                let run = run_from(&sub.graph, false, &seed, &BTreeMap::new(), 0)?;
                 acc =
                     run.values.get(&sub.output).cloned().ok_or_else(|| {
                         format!("`fold`: the body produced no `{}`", sub.output.0)
@@ -253,7 +293,7 @@ fn run_container(
             for item in xs {
                 let mut seed = BTreeMap::new();
                 seed.insert(sub.inputs[0].clone(), item.clone());
-                let run = run_from(&sub.graph, false, &seed, 0)?;
+                let run = run_from(&sub.graph, false, &seed, &BTreeMap::new(), 0)?;
                 let v =
                     run.values.get(&sub.output).cloned().ok_or_else(|| {
                         format!("`{op}`: the body produced no `{}`", sub.output.0)
@@ -284,6 +324,9 @@ fn run_container(
     }
 }
 
+/// A back edge just carried a value, and this much budget is left on it.
+type Spent = Vec<((String, String), u32)>;
+
 fn deliver(
     g: &Graph,
     src: &(String, String),
@@ -291,7 +334,7 @@ fn deliver(
     values: &mut BTreeMap<(String, String), Value>,
     stamps: &mut BTreeMap<(String, String), u64>,
     budgets: &mut [Option<u32>],
-) -> Result<(), String> {
+) -> Result<Spent, String> {
     let ids: Vec<usize> = g
         .edges
         .iter()
@@ -300,7 +343,7 @@ fn deliver(
         .map(|(i, _)| i)
         .collect();
     if ids.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
     let exclusive = ids
         .iter()
@@ -326,6 +369,7 @@ fn deliver(
         chosen = ids;
     }
 
+    let mut spent: Spent = Vec::new();
     for i in chosen {
         let edge = &g.edges[i];
         if edge.ring
@@ -335,11 +379,12 @@ fn deliver(
                 continue;
             }
             *room -= 1;
+            spent.push((edge.to.clone(), *room));
         }
         values.insert(edge.to.clone(), v.clone());
         *stamps.entry(edge.to.clone()).or_insert(0) += 1;
     }
-    Ok(())
+    Ok(spent)
 }
 
 fn eval(e: &Expr, src: &str, values: &BTreeMap<(String, String), Value>) -> Result<Value, String> {

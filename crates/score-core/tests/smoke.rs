@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use score_core::{Graph, Value, exec, parser, validate};
 
 fn build(src: &str) -> Graph {
@@ -42,6 +44,62 @@ fn newlines_are_layout() {
     let b = parser::parse(split).expect("split");
     assert_eq!(a.nodes.len(), b.nodes.len());
     assert_eq!(a.edges.len(), b.edges.len());
+}
+
+#[test]
+fn a_resumed_ring_reads_its_budget_from_the_journal() {
+    use std::collections::BTreeMap;
+
+    let g = build(include_str!("../../../examples/ring.score"));
+    let full = exec::run(&g, false).expect("run");
+    let text = score_core::journal::write(g.fingerprint(), &full.entries);
+    let back = score_core::journal::read(&text).expect("read");
+
+    // Stop the journal in the middle of the ring, as a crash would: after the
+    // first turn, with one budget line written.
+    let cut = 4;
+    let prefix: Vec<_> = back
+        .entries
+        .iter()
+        .filter(|e| e.seq <= cut)
+        .cloned()
+        .collect();
+    let mut seed = BTreeMap::new();
+    let mut budgets = BTreeMap::new();
+    for e in &prefix {
+        match e.kind {
+            exec::Kind::Budget => {
+                if let Value::Int(left) = e.value {
+                    budgets.insert((e.node.clone(), e.port.clone()), left.max(0) as u32);
+                }
+            }
+            exec::Kind::Fire => {
+                seed.insert((e.node.clone(), e.port.clone()), e.value.clone());
+            }
+        }
+    }
+
+    let again = exec::run_from(&g, false, &seed, &budgets, cut).expect("resume");
+
+    // The ring does not turn again: every node that fired is seeded and seeded
+    // nodes never re-fire. What the journal has to carry is the budget, so a
+    // resumed run must not hand the ring a fresh one.
+    assert!(
+        !again
+            .entries
+            .iter()
+            .any(|e| e.kind == exec::Kind::Fire && e.node == "acc")
+    );
+    let spent = again
+        .entries
+        .iter()
+        .find(|e| e.kind == exec::Kind::Budget)
+        .map(|e| e.value.clone());
+    assert_eq!(
+        spent,
+        Some(Value::Int(3)),
+        "4 left in the journal, minus one"
+    );
 }
 
 #[test]
@@ -284,7 +342,7 @@ fn resume_finishes_where_the_journal_stopped() {
     for e in &first.entries[..3] {
         seed.insert((e.node.clone(), e.port.clone()), e.value.clone());
     }
-    let again = exec::run_from(&g, false, &seed, 3).expect("resume");
+    let again = exec::run_from(&g, false, &seed, &BTreeMap::new(), 3).expect("resume");
     assert_eq!(again.entries.len(), 1);
     assert_eq!(again.entries[0].node, "print#1");
     assert_eq!(again.entries[0].seq, 4);
@@ -300,7 +358,7 @@ fn resume_rejects_a_value_the_graph_no_longer_has() {
     let mut seed: std::collections::BTreeMap<(String, String), Value> =
         std::collections::BTreeMap::new();
     seed.insert(("ghost".to_string(), "out".to_string()), Value::Int(1));
-    let e = exec::run_from(&g, false, &seed, 0).expect_err("must fail");
+    let e = exec::run_from(&g, false, &seed, &BTreeMap::new(), 0).expect_err("must fail");
     assert!(e.contains("ghost"), "{e}");
 }
 

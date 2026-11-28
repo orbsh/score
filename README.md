@@ -15,7 +15,9 @@ cargo run -p score-cli -- run examples/sum.score --journal /tmp/run.jsonl
 cargo run -p score-cli -- run examples/sum.score --resume /tmp/run.jsonl --journal /tmp/run2.jsonl
 ```
 
-The journal is one JSON line per firing (`seq`, `node`, `op`, `port`, `value`), under a header carrying the graph's fingerprint. `--resume` seeds a run from such a file: the values are re-delivered along the edges and the graph continues from the first node with no entry. A journal from a different graph is refused outright, so an edited program cannot be resumed against stale values.
+The journal is one JSON line per firing (`seq`, `kind`, `node`, `op`, `port`, `value`), under a header carrying the graph's fingerprint. `--resume` seeds a run from such a file: the values are re-delivered along the edges and the graph continues from the first node with no entry. A journal from a different graph is refused outright, so an edited program cannot be resumed against stale values.
+
+A ring's progress is not derivable from its firings, so a back edge writes a `kind: "budget"` line whenever it spends budget. Resuming therefore continues from the budget the journal had left instead of handing the ring a fresh one. Every node that fired is seeded, and a seeded node does not fire again, so a resumed ring stays where it stopped rather than turning afresh.
 
 Implemented today: the v0 surface (bindings, `<in|out>` ports, `->` / `-->` / `-[cond]->`, `const`, `def` with inlining), validation (ports, types, one edge per input, a `[*]` arm for every conditional branch, no ring without a budget), list and record values, and a worklist runtime with twenty in-process operators (`lit`, `add`, `concat`, `upper`, `len`, `print`, `range`, `count`, `sum`, `join`, `at`, `map`, `fold`, `filter`, `any`, `all`, `gt`, `eq`, `record`, `get`).
 
