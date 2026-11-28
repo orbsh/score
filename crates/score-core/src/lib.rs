@@ -6,6 +6,7 @@ pub mod journal;
 pub mod lexer;
 pub mod ops;
 pub mod parser;
+pub mod render;
 pub mod validate;
 pub mod value;
 

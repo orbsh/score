@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::process::ExitCode;
 
-use score_core::{Value, exec, journal, parser, validate};
+use score_core::{Value, exec, journal, parser, render, validate};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -27,7 +27,7 @@ fn main() -> ExitCode {
     }
     if positional.len() < 2 {
         eprintln!(
-            "usage: score <validate|run> <file> [--trace] [--journal <path>] [--resume <journal>]"
+            "usage: score <validate|graph|run> <file> [--trace] [--journal <path>] [--resume <journal>]"
         );
         return ExitCode::from(2);
     }
@@ -60,6 +60,10 @@ fn main() -> ExitCode {
                 graph.nodes.len(),
                 graph.edges.len()
             );
+            ExitCode::SUCCESS
+        }
+        "graph" => {
+            print!("{}", render::graph_text(&graph));
             ExitCode::SUCCESS
         }
         "run" => {

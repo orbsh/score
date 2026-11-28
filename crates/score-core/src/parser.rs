@@ -41,6 +41,11 @@ pub fn parse(src: &str) -> Result<Graph, String> {
     g.ctors = decls.ctors;
     g.structs = decls.structs;
     g.decl_attrs = decls.attrs;
+    g.sigs = decls
+        .defs
+        .iter()
+        .map(|(name, d)| (name.clone(), (d.params.clone(), d.outs.clone())))
+        .collect();
     Ok(g)
 }
 

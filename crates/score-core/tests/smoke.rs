@@ -47,6 +47,23 @@ fn newlines_are_layout() {
 }
 
 #[test]
+fn a_graph_renders_back_to_text() {
+    let g = build(include_str!("../../../examples/enum.score"));
+    let text = score_core::render::graph_text(&g);
+    assert!(
+        text.contains("enum Shape = Circle { r: Int } | Rect { w: Int, h: Int }"),
+        "{text}"
+    );
+    assert!(text.contains("c.Circle -> print#1.value"), "{text}");
+
+    let ring = build(include_str!("../../../examples/ring.score"));
+    assert!(
+        score_core::render::graph_text(&ring).contains("acc.out -> acc.a budget 5"),
+        "the ring edge keeps its budget"
+    );
+}
+
+#[test]
 fn a_resumed_ring_reads_its_budget_from_the_journal() {
     use std::collections::BTreeMap;
 

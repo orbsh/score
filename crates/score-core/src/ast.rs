@@ -86,6 +86,10 @@ pub struct Ctor {
 /// the identity, the fields are its payload, and the name doubles as an output
 /// port. See `Ctor`.
 pub type Attrs = BTreeMap<String, Option<String>>;
+/// A list of named, typed ports.
+pub type Fields = Vec<(String, Ty)>;
+/// What a `def` promises: its parameters and its outputs.
+pub type Signature = (Fields, Fields);
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Graph {
@@ -99,6 +103,9 @@ pub struct Graph {
     pub node_attrs: BTreeMap<String, Attrs>,
     /// The same, written above a declaration and keyed by its name.
     pub decl_attrs: BTreeMap<String, Attrs>,
+    /// Declared signatures, kept so a graph can be rendered back. A def's body
+    /// lives inlined at its call sites; this is only what it promises.
+    pub sigs: BTreeMap<String, Signature>,
 }
 
 impl Graph {

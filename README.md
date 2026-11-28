@@ -19,6 +19,8 @@ The journal is one JSON line per firing (`seq`, `kind`, `node`, `op`, `port`, `v
 
 A ring's progress is not derivable from its firings, so a back edge writes a `kind: "budget"` line whenever it spends budget. Resuming therefore continues from the budget the journal had left instead of handing the ring a fresh one. Every node that fired is seeded, and a seeded node does not fire again, so a resumed ring stays where it stopped rather than turning afresh.
 
+`graph` prints the parsed graph back as text: the declarations, then every node with its ports and arguments, then every edge with its guard and budget — what validation sees, after `def` calls have been inlined.
+
 Implemented today: the v0 surface (bindings, `<in|out>` ports, `->` / `-->` / `-[cond]->`, `const`, `def` with inlining), validation (ports, types, one edge per input, a `[*]` arm for every conditional branch, no ring without a budget), list and record values, and a worklist runtime with twenty in-process operators (`lit`, `add`, `concat`, `upper`, `len`, `print`, `range`, `count`, `sum`, `join`, `at`, `map`, `fold`, `filter`, `any`, `all`, `gt`, `eq`, `record`, `get`).
 
 A record is built from its arguments (`r = record(name: "ada", age: 36)`) and read with `get`; its fields are its arguments, so `record` declares no input ports of its own.
