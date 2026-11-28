@@ -47,6 +47,28 @@ fn newlines_are_layout() {
 }
 
 #[test]
+fn a_list_names_what_it_holds() {
+    let src = "def total(xs: List<Int>) -> (out: Int) {\n  out = sum(xs: xs)\n}\nxs = range(n: 4)\nt = total(xs: xs)\n";
+    let g = build(src);
+    assert_eq!(
+        g.sigs.get("total").map(|(params, _)| params[0].1.clone()),
+        Some(Ty::List(Box::new(Ty::Int)))
+    );
+    assert!(
+        score_core::render::graph_text(&g).contains("def total(xs: List<Int>) -> (out: Int)"),
+        "the element type is part of the signature"
+    );
+}
+
+#[test]
+fn a_list_of_the_wrong_element_is_rejected() {
+    let src = "def words(xs: List<Text>) -> (out: Int) {\n  out = count(xs: xs)\n}\nxs = range(n: 3)\nw = words(xs: xs)\n";
+    let e = parser::parse(src).expect_err("parse");
+    assert!(e.contains("wants List<Text>"), "{e}");
+    assert!(e.contains("got List<Int>"), "{e}");
+}
+
+#[test]
 fn match_arms_must_agree_on_a_type() {
     let src = "enum Shape {\n  Circle { r: Int }\n  Rect { w: Int, h: Int }\n}\ndef a(r: Int) -> (out: Text) {\n  out = lit(value: \"x\")\n}\ndef b(w: Int, h: Int) -> (out: Int) {\n  out = lit(value: 1)\n}\ns = Circle(r: 1)\nm = match(on: s, Circle: a, Rect: b)\n";
     let e = parser::parse(src).expect_err("parse");

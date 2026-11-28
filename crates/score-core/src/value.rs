@@ -24,7 +24,8 @@ pub enum Ty {
     Text,
     Bool,
     Unit,
-    List,
+    /// A list together with what it holds; `List<Any>` is an unknown element.
+    List(Box<Ty>),
     Record,
     Any,
     /// A type the program declared with `enum` or `struct`.
@@ -32,16 +33,16 @@ pub enum Ty {
 }
 
 impl Ty {
-    pub fn name(&self) -> &str {
+    pub fn name(&self) -> String {
         match self {
-            Ty::Int => "Int",
-            Ty::Text => "Text",
-            Ty::Bool => "Bool",
-            Ty::Unit => "Unit",
-            Ty::List => "List",
-            Ty::Record => "Record",
-            Ty::Any => "Any",
-            Ty::Named(n) => n,
+            Ty::Int => "Int".to_string(),
+            Ty::Text => "Text".to_string(),
+            Ty::Bool => "Bool".to_string(),
+            Ty::Unit => "Unit".to_string(),
+            Ty::List(t) => format!("List<{}>", t.name()),
+            Ty::Record => "Record".to_string(),
+            Ty::Any => "Any".to_string(),
+            Ty::Named(n) => n.clone(),
         }
     }
 }
@@ -52,14 +53,18 @@ pub fn type_of(v: &Value) -> Ty {
         Value::Text(_) => Ty::Text,
         Value::Bool(_) => Ty::Bool,
         Value::Unit => Ty::Unit,
-        Value::List(_) => Ty::List,
+        Value::List(_) => Ty::List(Box::new(Ty::Any)),
         Value::Record(_) => Ty::Record,
         Value::Variant { .. } => Ty::Any,
     }
 }
 
 pub fn accepts(declared: &Ty, actual: &Ty) -> bool {
-    *declared == Ty::Any || *actual == Ty::Any || declared == actual
+    match (declared, actual) {
+        (Ty::Any, _) | (_, Ty::Any) => true,
+        (Ty::List(d), Ty::List(a)) => accepts(d, a),
+        _ => declared == actual,
+    }
 }
 
 impl Value {

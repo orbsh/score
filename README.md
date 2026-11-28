@@ -27,7 +27,7 @@ A record is built from its arguments (`r = record(name: "ada", age: 36)`) and re
 
 Types are declared with braces, like the rest of the language: `enum Shape { Circle { r: Int } Rect { w: Int, h: Int } }` and `struct Person { name: Text, age: Int }`. A variant name is also the port its value leaves on, so `c = Circle(r: 3)` is read at `c`'s `Circle` port; a struct name is its own constructor and yields a record.
 
-A declared type can be named on a port: `def describe(s: Shape) -> (out: Text)`. A name the program does not declare is rejected, since the parser cannot tell a typo from a type. `List` and `Record` still carry no member types.
+A declared type can be named on a port: `def describe(s: Shape) -> (out: Text)`. A name the program does not declare is rejected, since the parser cannot tell a typo from a type. A list names what it holds — `List<Int>`, or `List<Any>` when nobody says — and the element is checked: `range` produces `List<Int>`, so passing it where `List<Text>` is wanted is refused. `Record` still carries no field types.
 
 Sums are consumed by `match`, which names one def per variant: `m = match(on: s, Circle: circle, Rect: rect)`. The arm runs with the payload's fields seeded into its parameters by name, so an arm's parameters must be the variant's fields, in order. Every variant has to be named — a missing arm is a validation error, and so is an arm that is not a variant of that sum. The value matched on must come from a constructor (directly or through a def), which is what tells validation which sum the arms have to cover. The arms must also agree on the type they produce, and that type becomes the node's, so an edge out of a `match` is checked like any other.
 

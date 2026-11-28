@@ -1,0 +1,8 @@
+# List<T> 说清元素是什么：range 产出 List<Int>，sum 只吃列表
+def total(xs: List<Int>) -> (out: Int) {
+  out = sum(xs: xs)
+}
+
+xs = range(n: 4)
+t = total(xs: xs)
+t -> print

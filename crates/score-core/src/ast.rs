@@ -159,7 +159,7 @@ impl Graph {
             field(&mut h, &ctor.sum);
             for (f, t) in &ctor.fields {
                 field(&mut h, f);
-                field(&mut h, t.name());
+                field(&mut h, &t.name());
             }
         }
         for (name, fields) in &self.structs {
@@ -167,7 +167,7 @@ impl Graph {
             field(&mut h, name);
             for (f, t) in fields {
                 field(&mut h, f);
-                field(&mut h, t.name());
+                field(&mut h, &t.name());
             }
         }
         h

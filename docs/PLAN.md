@@ -54,9 +54,10 @@
 - 环只有预算一种形态：`-[budget: n]->` 的回边最多回灌 n 次；初值来自同一个端口的普通边（没有单独的 seed 节点）。无预算的环被 validate 拒绝，`unbounded` 靠运行期 100 万次发火上限兜底。
 - resume 保存环的预算：回边每花一次预算就往日志写一条 `kind: "budget"` 行，恢复时从剩余值继续，不再重发一份满预算。真正剩下的限制是：发过火的节点被 seed 之后不再发火，所以恢复出来的环停在那里，不会再转。
 - `def` 不能递归（定义必须先于调用）；多参数 def 从链上进入时要显式写入口端口 `<p|>`。
-- `List` 没有元素类型参数：`List` 表示任意列表，`List<Row>` 还不存在；`map` / `fold` 已能对 def 逐元素求值，但不能捕获外层值（body 只看得见自己的参数）。
+- `map` / `fold` 已能对 def 逐元素求值，但不能捕获外层值（body 只看得见自己的参数）；`map` 的输出是 `List<Any>`，因为不会去推 body 的元素类型。
 - `Record` 是一个值，但没有字段类型：`record(name: "ada")` 的字段就是它的实参，取字段只能用 `get`，没有 `r.name` 语法糖。
-- `Ty` 是 `Int` / `Text` / `Bool` / `Unit` / `List` / `Record` / `Any` 加 `Named`：端口上可以写 `enum` / `struct` 声明的类型名，未声明的名字被 validate 拒绝。`List` / `Record` 仍不带成员类型（`List<Row>` 不存在）。
+- `Ty` 是 `Int` / `Text` / `Bool` / `Unit` / `List<T>` / `Record` / `Any` 加 `Named`：端口上可以写 `enum` / `struct` 声明的类型名，未声明的名字被 validate 拒绝；列表带元素类型（`List<Int>`、`List<Any>`，可嵌套），元素不合就是错误。
+- `Record` 仍不带字段类型，所以 `struct` 里声明的字段类型只用于构造期检查，取出来之后就没有类型了。
 - 和类型由 `match(on: s, Circle: f, Rect: g)` 消费：臂的形参必须就是变体的字段（同名同序），每个变体都要有臂，少一个 validate 就拒；被 match 的值必须来自构造器（直接或经 def 内联），validate 由它得知该和类型有哪些臂。
 - 和类型还没有穷尽性以外的东西：没有 `[*]` 兜底臂；`match` 也不接受类型为 `Any` 的值。
 - `match` 的臂必须产出同一类型，该类型记在节点上（`Graph.node_tys`），出边按它检查，`score graph` 显示成 `.out: Text`。

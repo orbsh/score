@@ -63,34 +63,34 @@ fn table() -> &'static BTreeMap<&'static str, Sig> {
                 "range",
                 Sig {
                     ins: vec![("n", Ty::Int)],
-                    outs: vec![("out", Ty::List)],
+                    outs: vec![("out", Ty::List(Box::new(Ty::Int)))],
                 },
             ),
             (
                 "count",
                 Sig {
-                    ins: vec![("xs", Ty::List)],
+                    ins: vec![("xs", Ty::List(Box::new(Ty::Any)))],
                     outs: vec![("out", Ty::Int)],
                 },
             ),
             (
                 "sum",
                 Sig {
-                    ins: vec![("xs", Ty::List)],
+                    ins: vec![("xs", Ty::List(Box::new(Ty::Any)))],
                     outs: vec![("out", Ty::Int)],
                 },
             ),
             (
                 "join",
                 Sig {
-                    ins: vec![("xs", Ty::List), ("sep", Ty::Text)],
+                    ins: vec![("xs", Ty::List(Box::new(Ty::Any))), ("sep", Ty::Text)],
                     outs: vec![("out", Ty::Text)],
                 },
             ),
             (
                 "at",
                 Sig {
-                    ins: vec![("xs", Ty::List), ("index", Ty::Int)],
+                    ins: vec![("xs", Ty::List(Box::new(Ty::Any))), ("index", Ty::Int)],
                     outs: vec![("out", Ty::Any)],
                 },
             ),
@@ -104,35 +104,39 @@ fn table() -> &'static BTreeMap<&'static str, Sig> {
             (
                 "map",
                 Sig {
-                    ins: vec![("f", Ty::Any), ("xs", Ty::List)],
-                    outs: vec![("out", Ty::List)],
+                    ins: vec![("f", Ty::Any), ("xs", Ty::List(Box::new(Ty::Any)))],
+                    outs: vec![("out", Ty::List(Box::new(Ty::Any)))],
                 },
             ),
             (
                 "fold",
                 Sig {
-                    ins: vec![("f", Ty::Any), ("acc", Ty::Any), ("xs", Ty::List)],
+                    ins: vec![
+                        ("f", Ty::Any),
+                        ("acc", Ty::Any),
+                        ("xs", Ty::List(Box::new(Ty::Any))),
+                    ],
                     outs: vec![("out", Ty::Any)],
                 },
             ),
             (
                 "filter",
                 Sig {
-                    ins: vec![("f", Ty::Any), ("xs", Ty::List)],
-                    outs: vec![("out", Ty::List)],
+                    ins: vec![("f", Ty::Any), ("xs", Ty::List(Box::new(Ty::Any)))],
+                    outs: vec![("out", Ty::List(Box::new(Ty::Any)))],
                 },
             ),
             (
                 "any",
                 Sig {
-                    ins: vec![("f", Ty::Any), ("xs", Ty::List)],
+                    ins: vec![("f", Ty::Any), ("xs", Ty::List(Box::new(Ty::Any)))],
                     outs: vec![("out", Ty::Bool)],
                 },
             ),
             (
                 "all",
                 Sig {
-                    ins: vec![("f", Ty::Any), ("xs", Ty::List)],
+                    ins: vec![("f", Ty::Any), ("xs", Ty::List(Box::new(Ty::Any)))],
                     outs: vec![("out", Ty::Bool)],
                 },
             ),

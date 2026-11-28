@@ -1043,9 +1043,9 @@ fn parse_fields(toks: &[Tok]) -> Result<Vec<(String, Ty)>, String> {
         if !matches!(toks.get(i + 1), Some(Tok::Colon)) {
             return Err(format!("field `{name}` needs `: Type`"));
         }
-        let ty = parse_ty(toks.get(i + 2))?;
+        let (ty, next) = parse_ty(toks, i + 2)?;
         out.push((name, ty));
-        i += 3;
+        i = next;
         match toks.get(i) {
             Some(Tok::Comma) => i += 1,
             None => break,
@@ -1194,9 +1194,9 @@ fn parse_def_header(toks: &[Tok]) -> Result<DefSig, String> {
                 if !matches!(toks.get(i + 1), Some(Tok::Colon)) {
                     return Err(format!("`def {name}`: `{p}` needs `: Type`"));
                 }
-                let ty = parse_ty(toks.get(i + 2))?;
+                let (ty, next) = parse_ty(toks, i + 2)?;
                 params.push((p, ty));
-                i += 3;
+                i = next;
                 match toks.get(i) {
                     Some(Tok::Comma) => i += 1,
                     Some(Tok::RParen) => {
@@ -1226,8 +1226,8 @@ fn parse_def_header(toks: &[Tok]) -> Result<DefSig, String> {
             Some(Tok::Ident(o)) => {
                 let o = o.clone();
                 let ty = if matches!(toks.get(i + 1), Some(Tok::Colon)) {
-                    let t = parse_ty(toks.get(i + 2))?;
-                    i += 3;
+                    let (t, next) = parse_ty(toks, i + 2)?;
+                    i = next;
                     t
                 } else {
                     i += 1;
@@ -1252,20 +1252,33 @@ fn parse_def_header(toks: &[Tok]) -> Result<DefSig, String> {
     Ok((name, params, outs))
 }
 
-fn parse_ty(tok: Option<&Tok>) -> Result<Ty, String> {
-    match tok {
-        Some(Tok::Ident(n)) => match n.as_str() {
-            "Int" => Ok(Ty::Int),
-            "Text" => Ok(Ty::Text),
-            "Bool" => Ok(Ty::Bool),
-            "Unit" => Ok(Ty::Unit),
-            "Any" => Ok(Ty::Any),
-            // Anything else names a type the program declares with `enum` or
-            // `struct`; validate checks that the name exists.
-            other => Ok(Ty::Named(other.to_string())),
-        },
-        other => Err(format!("expected a type, got {other:?}")),
+fn parse_ty(toks: &[Tok], i: usize) -> Result<(Ty, usize), String> {
+    let name = match toks.get(i) {
+        Some(Tok::Ident(n)) => n.clone(),
+        other => return Err(format!("expected a type, got {other:?}")),
+    };
+    if name == "List" && matches!(toks.get(i + 1), Some(Tok::Lt)) {
+        let (elem, next) = parse_ty(toks, i + 2)?;
+        if !matches!(toks.get(next), Some(Tok::Gt)) {
+            return Err("`List<…>` needs a closing `>`".to_string());
+        }
+        return Ok((Ty::List(Box::new(elem)), next + 1));
     }
+    let ty = match name.as_str() {
+        "Int" => Ty::Int,
+        "Text" => Ty::Text,
+        "Bool" => Ty::Bool,
+        "Unit" => Ty::Unit,
+        // A bare `List` says nothing about its elements; that is the same
+        // statement as `List<Any>`.
+        "List" => Ty::List(Box::new(Ty::Any)),
+        "Record" => Ty::Record,
+        "Any" => Ty::Any,
+        // Anything else names a type the program declares with `enum` or
+        // `struct`; validate checks that the name exists.
+        other => Ty::Named(other.to_string()),
+    };
+    Ok((ty, i + 1))
 }
 
 fn literal(tok: Option<&Tok>) -> Option<Value> {
