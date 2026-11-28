@@ -1,0 +1,7 @@
+# 列表能长大：push 追加一个元素，cat 拼接两个列表，都返回新值
+xs = range(n: 3)
+one = lit(value: 99)
+ys = push(xs: xs, v: one)
+zs = cat(a: xs, b: ys)
+ys -> print
+zs -> print

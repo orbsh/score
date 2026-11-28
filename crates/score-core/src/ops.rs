@@ -199,6 +199,23 @@ fn table() -> &'static BTreeMap<&'static str, Sig> {
                 },
             ),
             (
+                "push",
+                Sig {
+                    ins: vec![("xs", Ty::List(Box::new(Ty::Any))), ("v", Ty::Any)],
+                    outs: vec![("out", Ty::List(Box::new(Ty::Any)))],
+                },
+            ),
+            (
+                "cat",
+                Sig {
+                    ins: vec![
+                        ("a", Ty::List(Box::new(Ty::Any))),
+                        ("b", Ty::List(Box::new(Ty::Any))),
+                    ],
+                    outs: vec![("out", Ty::List(Box::new(Ty::Any)))],
+                },
+            ),
+            (
                 "to_text",
                 Sig {
                     ins: vec![("v", Ty::Any)],
@@ -361,6 +378,29 @@ pub fn apply(op: &str, args: &BTreeMap<&str, Value>) -> Result<Value, String> {
             "`{op}` runs a def per element and is driven by the runtime, not by `apply`"
         )),
         "param" => Err("a parameter is seeded by the runtime, it never fires".to_string()),
+        "push" => {
+            let xs = get("xs")?;
+            let Value::List(items) = &xs else {
+                return Err(format!("`push` wants a list, got {}", type_of(&xs).name()));
+            };
+            let mut out = items.clone();
+            out.push(get("v")?);
+            Ok(Value::List(out))
+        }
+        "cat" => {
+            let a = get("a")?;
+            let b = get("b")?;
+            let (Value::List(x), Value::List(y)) = (&a, &b) else {
+                return Err(format!(
+                    "`cat` wants two lists, got {} and {}",
+                    type_of(&a).name(),
+                    type_of(&b).name()
+                ));
+            };
+            let mut out = x.clone();
+            out.extend(y.iter().cloned());
+            Ok(Value::List(out))
+        }
         "to_text" => Ok(Value::Text(get("v")?.to_string())),
         "to_int" => {
             let t = get("text")?;
