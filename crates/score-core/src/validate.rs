@@ -183,7 +183,7 @@ pub fn validate(g: &Graph) -> Result<(), String> {
             continue;
         }
         let sig = ops::signature(&n.op).ok_or_else(|| format!("unknown operator `{}`", n.op))?;
-        for (port, _) in sig.ins {
+        for (port, _) in &sig.ins {
             let has_arg = n.args.contains_key(*port);
             let has_edge = g.edges.iter().any(|e| e.to.0 == n.name && e.to.1 == *port);
             if has_arg && has_edge {

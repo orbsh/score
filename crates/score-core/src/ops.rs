@@ -1,106 +1,180 @@
 //! The operator table for the first slice.
 
 use std::collections::BTreeMap;
+use std::sync::OnceLock;
 
 use crate::value::{Ty, Value, type_of};
 
 pub struct Sig {
-    pub ins: &'static [(&'static str, Ty)],
-    pub outs: &'static [(&'static str, Ty)],
+    pub ins: Vec<(&'static str, Ty)>,
+    pub outs: Vec<(&'static str, Ty)>,
 }
 
-static LIT: Sig = Sig {
-    ins: &[("value", Ty::Any)],
-    outs: &[("out", Ty::Any)],
-};
-static ADD: Sig = Sig {
-    ins: &[("a", Ty::Int), ("b", Ty::Int)],
-    outs: &[("out", Ty::Int)],
-};
-static CONCAT: Sig = Sig {
-    ins: &[("a", Ty::Text), ("b", Ty::Text)],
-    outs: &[("out", Ty::Text)],
-};
-static UPPER: Sig = Sig {
-    ins: &[("text", Ty::Text)],
-    outs: &[("out", Ty::Text)],
-};
-static LEN: Sig = Sig {
-    ins: &[("text", Ty::Text)],
-    outs: &[("out", Ty::Int)],
-};
-static PRINT: Sig = Sig {
-    ins: &[("value", Ty::Any)],
-    outs: &[("out", Ty::Unit)],
-};
-static RANGE: Sig = Sig {
-    ins: &[("n", Ty::Int)],
-    outs: &[("out", Ty::List)],
-};
-static COUNT: Sig = Sig {
-    ins: &[("xs", Ty::List)],
-    outs: &[("out", Ty::Int)],
-};
-static SUM: Sig = Sig {
-    ins: &[("xs", Ty::List)],
-    outs: &[("out", Ty::Int)],
-};
-static JOIN: Sig = Sig {
-    ins: &[("xs", Ty::List), ("sep", Ty::Text)],
-    outs: &[("out", Ty::Text)],
-};
-static AT: Sig = Sig {
-    ins: &[("xs", Ty::List), ("index", Ty::Int)],
-    outs: &[("out", Ty::Any)],
-};
-/// A def's parameter while its body sits inside a container node; the runtime
-/// seeds it, so it never fires on its own.
-static PARAM: Sig = Sig {
-    ins: &[],
-    outs: &[],
-};
-static MAP: Sig = Sig {
-    ins: &[("f", Ty::Any), ("xs", Ty::List)],
-    outs: &[("out", Ty::List)],
-};
-static FOLD: Sig = Sig {
-    ins: &[("f", Ty::Any), ("acc", Ty::Any), ("xs", Ty::List)],
-    outs: &[("out", Ty::Any)],
-};
-static FILTER: Sig = Sig {
-    ins: &[("f", Ty::Any), ("xs", Ty::List)],
-    outs: &[("out", Ty::List)],
-};
-static ANY: Sig = Sig {
-    ins: &[("f", Ty::Any), ("xs", Ty::List)],
-    outs: &[("out", Ty::Bool)],
-};
-static ALL: Sig = Sig {
-    ins: &[("f", Ty::Any), ("xs", Ty::List)],
-    outs: &[("out", Ty::Bool)],
-};
-static GT: Sig = Sig {
-    ins: &[("a", Ty::Any), ("b", Ty::Any)],
-    outs: &[("out", Ty::Bool)],
-};
-static EQ: Sig = Sig {
-    ins: &[("a", Ty::Any), ("b", Ty::Any)],
-    outs: &[("out", Ty::Bool)],
-};
-/// A record's fields are its arguments, so it declares no inputs of its own.
-static RECORD: Sig = Sig {
-    ins: &[],
-    outs: &[("out", Ty::Record)],
-};
-static GET: Sig = Sig {
-    ins: &[("r", Ty::Any), ("key", Ty::Text)],
-    outs: &[("out", Ty::Any)],
-};
-/// The variant name of a tagged value.
-static TAG: Sig = Sig {
-    ins: &[("v", Ty::Any)],
-    outs: &[("out", Ty::Text)],
-};
+/// The operator table is built at first use instead of being declared as
+/// statics: a port type such as `List<Int>` owns its element type, and a const
+/// slice cannot hold one.
+fn table() -> &'static BTreeMap<&'static str, Sig> {
+    static TABLE: OnceLock<BTreeMap<&'static str, Sig>> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        let entries: Vec<(&'static str, Sig)> = vec![
+            (
+                "lit",
+                Sig {
+                    ins: vec![("value", Ty::Any)],
+                    outs: vec![("out", Ty::Any)],
+                },
+            ),
+            (
+                "add",
+                Sig {
+                    ins: vec![("a", Ty::Int), ("b", Ty::Int)],
+                    outs: vec![("out", Ty::Int)],
+                },
+            ),
+            (
+                "concat",
+                Sig {
+                    ins: vec![("a", Ty::Text), ("b", Ty::Text)],
+                    outs: vec![("out", Ty::Text)],
+                },
+            ),
+            (
+                "upper",
+                Sig {
+                    ins: vec![("text", Ty::Text)],
+                    outs: vec![("out", Ty::Text)],
+                },
+            ),
+            (
+                "len",
+                Sig {
+                    ins: vec![("text", Ty::Text)],
+                    outs: vec![("out", Ty::Int)],
+                },
+            ),
+            (
+                "print",
+                Sig {
+                    ins: vec![("value", Ty::Any)],
+                    outs: vec![("out", Ty::Unit)],
+                },
+            ),
+            (
+                "range",
+                Sig {
+                    ins: vec![("n", Ty::Int)],
+                    outs: vec![("out", Ty::List)],
+                },
+            ),
+            (
+                "count",
+                Sig {
+                    ins: vec![("xs", Ty::List)],
+                    outs: vec![("out", Ty::Int)],
+                },
+            ),
+            (
+                "sum",
+                Sig {
+                    ins: vec![("xs", Ty::List)],
+                    outs: vec![("out", Ty::Int)],
+                },
+            ),
+            (
+                "join",
+                Sig {
+                    ins: vec![("xs", Ty::List), ("sep", Ty::Text)],
+                    outs: vec![("out", Ty::Text)],
+                },
+            ),
+            (
+                "at",
+                Sig {
+                    ins: vec![("xs", Ty::List), ("index", Ty::Int)],
+                    outs: vec![("out", Ty::Any)],
+                },
+            ),
+            (
+                "param",
+                Sig {
+                    ins: vec![],
+                    outs: vec![],
+                },
+            ),
+            (
+                "map",
+                Sig {
+                    ins: vec![("f", Ty::Any), ("xs", Ty::List)],
+                    outs: vec![("out", Ty::List)],
+                },
+            ),
+            (
+                "fold",
+                Sig {
+                    ins: vec![("f", Ty::Any), ("acc", Ty::Any), ("xs", Ty::List)],
+                    outs: vec![("out", Ty::Any)],
+                },
+            ),
+            (
+                "filter",
+                Sig {
+                    ins: vec![("f", Ty::Any), ("xs", Ty::List)],
+                    outs: vec![("out", Ty::List)],
+                },
+            ),
+            (
+                "any",
+                Sig {
+                    ins: vec![("f", Ty::Any), ("xs", Ty::List)],
+                    outs: vec![("out", Ty::Bool)],
+                },
+            ),
+            (
+                "all",
+                Sig {
+                    ins: vec![("f", Ty::Any), ("xs", Ty::List)],
+                    outs: vec![("out", Ty::Bool)],
+                },
+            ),
+            (
+                "gt",
+                Sig {
+                    ins: vec![("a", Ty::Any), ("b", Ty::Any)],
+                    outs: vec![("out", Ty::Bool)],
+                },
+            ),
+            (
+                "eq",
+                Sig {
+                    ins: vec![("a", Ty::Any), ("b", Ty::Any)],
+                    outs: vec![("out", Ty::Bool)],
+                },
+            ),
+            (
+                "record",
+                Sig {
+                    ins: vec![],
+                    outs: vec![("out", Ty::Record)],
+                },
+            ),
+            (
+                "get",
+                Sig {
+                    ins: vec![("r", Ty::Any), ("key", Ty::Text)],
+                    outs: vec![("out", Ty::Any)],
+                },
+            ),
+            (
+                "tag",
+                Sig {
+                    ins: vec![("v", Ty::Any)],
+                    outs: vec![("out", Ty::Text)],
+                },
+            ),
+        ];
+        entries.into_iter().collect()
+    })
+}
 
 /// An operator that takes its arguments as fields rather than as named ports.
 pub fn is_variadic(op: &str) -> bool {
@@ -108,31 +182,7 @@ pub fn is_variadic(op: &str) -> bool {
 }
 
 pub fn signature(op: &str) -> Option<&'static Sig> {
-    match op {
-        "lit" => Some(&LIT),
-        "add" => Some(&ADD),
-        "concat" => Some(&CONCAT),
-        "upper" => Some(&UPPER),
-        "len" => Some(&LEN),
-        "print" => Some(&PRINT),
-        "range" => Some(&RANGE),
-        "count" => Some(&COUNT),
-        "sum" => Some(&SUM),
-        "join" => Some(&JOIN),
-        "at" => Some(&AT),
-        "param" => Some(&PARAM),
-        "map" => Some(&MAP),
-        "fold" => Some(&FOLD),
-        "filter" => Some(&FILTER),
-        "any" => Some(&ANY),
-        "all" => Some(&ALL),
-        "gt" => Some(&GT),
-        "eq" => Some(&EQ),
-        "record" => Some(&RECORD),
-        "get" => Some(&GET),
-        "tag" => Some(&TAG),
-        _ => None,
-    }
+    table().get(op)
 }
 
 pub fn default_in(sig: &Sig) -> Option<&'static str> {
